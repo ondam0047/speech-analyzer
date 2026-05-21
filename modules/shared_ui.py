@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21q · 전사 검수에 발화 합치기(⬆합치기) 추가"
+BUILD_TAG = "2026-05-21r · 전사 페이지에서 말명료도 표시 제거(조음에서 계산)"
 
 
 def g2p_self_test() -> tuple[bool, str]:
