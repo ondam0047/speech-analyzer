@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from modules.norms import reference_text
+from modules.norms import developmental_reference, reference_text
 from modules.transcription import TranscriptionError, _get_client
 
 APAC_TAXONOMY = (
@@ -86,6 +86,52 @@ def summarize_language(language: dict) -> str:
     return "\n".join(lines)
 
 
+def norm_comparison(articulation: dict, age_months: int | None) -> str:
+    """대상자의 실제 오류를 생활연령 규준과 직접 대조한 결과(프롬프트·표시용).
+
+    어떤 자음 오류가 '연령상 완전습득 기대인데 오류(지연/주목)'인지,
+    '아직 발달 중이라 정상 범위'인지, 어떤 음운변동이 '이 연령엔 사라졌어야 하는데
+    관찰됨'인지를 명시해 LLM이 규준 대비 현행수준을 비교 기술하도록 한다.
+    """
+    ref = developmental_reference(age_months)
+    if ref is None:
+        return ""
+    mastered = set(ref["mastered_expected"])
+    developing = set(ref["developing"])
+    should_resolve = set(ref["processes_should_resolve"])
+    acc = articulation.get("phoneme_accuracy", {})
+    err_phonemes = [ph for ph, a in acc.items() if a < 100]
+    on_mastered = [ph for ph in err_phonemes if ph in mastered]
+    on_developing = [ph for ph in err_phonemes if ph in developing]
+    pp = articulation.get("phonological_processes") or []
+    proc_late = [x["process"] for x in pp if x["process"] in should_resolve]
+    atypical = [x["process"] for x in pp if x["type"] == "비전형"]
+    vowel_err = bool(articulation.get("vowel_errors"))
+
+    y, m = divmod(ref["age_months"], 12)
+    lines = [
+        f"[생활연령 규준 대비 현행수준 비교 — 이 비교를 코멘트에 반드시 반영]",
+        f"  · 생활연령 {y}세 {m}개월 / 대상자 PCC {articulation.get('pcc')}% "
+        f"(연령 기대 {ref['expected_pcc']})",
+    ]
+    if on_mastered:
+        lines.append("  · ⚠ 이 연령엔 완전습득이 기대되나 오류가 관찰된 자음(연령 대비 지연/주목): "
+                     + ", ".join(on_mastered))
+    if on_developing:
+        lines.append("  · 아직 발달 중이라 오류가 연령상 정상 범위일 수 있는 자음: "
+                     + ", ".join(on_developing))
+    if not err_phonemes:
+        lines.append("  · 자음 오류 없음 — 연령 기대 수준 충족")
+    if proc_late:
+        lines.append("  · ⚠ 이 연령엔 대부분 사라졌어야 할 발달적 음운변동이 관찰됨: "
+                     + ", ".join(sorted(set(proc_late))))
+    if atypical:
+        lines.append("  · ⚠ 비전형(비발달적) 패턴(연령 무관 주목): " + ", ".join(sorted(set(atypical))))
+    if vowel_err:
+        lines.append("  · 모음 오류 있음 — 단모음은 만 3세 이전 안정되므로 연령 대비 검토 필요")
+    return "\n".join(lines)
+
+
 def _build_prompt(articulation: dict | None, language: dict | None,
                   age_months: int | None = None) -> tuple[str, str]:
     system = (
@@ -101,13 +147,21 @@ def _build_prompt(articulation: dict | None, language: dict | None,
     parts = []
     if articulation is not None:
         parts.append("[조음 분석 요약]\n" + summarize_articulation(articulation))
+        cmp_text = norm_comparison(articulation, age_months)
+        if cmp_text:
+            parts.append(cmp_text)
     if language is not None:
         parts.append("[언어 분석 요약]\n" + summarize_language(language))
     user = (
-        "다음 자동 분석 결과를 바탕으로, ① 두드러진 조음·음운 오류 패턴과 가능한 음운변동 해석, "
-        "② 생활연령 대비 적절성(연령상 정상 vs 주목 대상)을 발달 규준 근거와 함께, "
-        "③ 어휘·구문(언어) 특징, ④ 임상적 제언을 간결한 한국어 불릿으로 정리하세요. "
-        "확실하지 않은 부분은 검수 필요로 표시하고, 최종 판정은 표준화 검사 백분위로 확인하도록 권고하세요.\n\n"
+        "다음 자동 분석 결과를 바탕으로 한국어 불릿으로 정리하세요.\n"
+        "① 두드러진 조음·음운 오류 패턴과 가능한 음운변동 해석\n"
+        "② **생활연령 규준 대비 현행수준 비교** — 위 '규준 대비 현행수준 비교' 정보를 활용해, "
+        "어떤 자음/음운변동이 연령 기대 대비 '지연/주목 대상'이고 어떤 것이 '연령상 정상 범위'인지 "
+        "구체적 음소·변동명과 함께 반드시 기술(이 항목은 생략 금지)\n"
+        "③ 어휘·구문(언어) 특징\n"
+        "④ 임상적 제언\n"
+        "확실하지 않은 부분은 검수 필요로 표시하고, 최종 판정은 표준화 검사(U-TAP2/APAC) 백분위로 "
+        "확인하도록 권고하세요.\n\n"
         + "\n\n".join(parts)
     )
     return system, user
