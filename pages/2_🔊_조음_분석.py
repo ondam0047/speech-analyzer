@@ -58,22 +58,22 @@ if result:
         st.caption(f"LLM 코멘트는 생활연령 **{patient.get('age', '')}** 기준 발달 규준으로 "
                    "연령 대비 적절성을 함께 해석합니다.")
     else:
-        st.caption("사이드바에 생년월일/검사일을 입력하면 LLM 코멘트가 생활연령 기준 발달 규준으로 "
-                   "연령 대비 적절성까지 해석합니다.")
+        st.warning("⚠️ 생활연령이 계산되지 않아 LLM 임상 코멘트를 생성할 수 없습니다. "
+                   "사이드바에 **생년월일·검사일**을 입력하세요(연령 기반 발달 규준 해석에 필요).")
     with st.expander("📚 연령 기반 발달 규준 (코멘트 근거) 보기"):
         st.text(reference_text(age_months))
         st.markdown("**참고 문헌**")
         for r in REFERENCES:
             st.caption(f"- {r}")
 
-    if st.button("🧠 LLM 임상 코멘트 생성"):
+    if st.button("🧠 LLM 임상 코멘트 생성", disabled=not age_months):
         try:
             with st.spinner("코멘트 생성 중…"):
                 st.session_state["artic_insight"] = generate_insight(
                     articulation=result, api_key=api_key, age_months=age_months)
         except TranscriptionError as e:
             st.error(str(e))
-    if st.session_state.get("artic_insight"):
+    if age_months and st.session_state.get("artic_insight"):
         st.markdown(st.session_state["artic_insight"])
 
 st.divider()
