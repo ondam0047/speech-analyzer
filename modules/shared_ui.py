@@ -242,6 +242,7 @@ def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
             "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
         },
     )
+    st.session_state[disp_key] = edited  # 편집 즉시 보존(입력 유실 방지)
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
     if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_tsplit"):
         new_rows = []
@@ -335,6 +336,7 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
             "산출형": st.column_config.TextColumn("산출형 (실제 발음)", width="medium"),
         },
     )
+    st.session_state[disp_key] = edited  # 편집 즉시 보존(입력 유실 방지)
 
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
     c_split, c_gen = st.columns(2)
@@ -517,6 +519,8 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             "산출형": st.column_config.TextColumn("산출형 (들리는 실제 발음)", width="medium"),
         },
     )
+    # 편집 결과를 즉시 세션에 보존 → 다른 리런에도 입력이 유지됨(입력 유실 방지)
+    st.session_state[disp_key] = edited
 
     if st.button("✂️ 발화 나누기 (목표어 기준 · 산출형 동반)", key=f"{prefix}_msplit"):
         new_rows = []
@@ -529,20 +533,21 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             st.session_state[ver_key] = ver + 1
             st.rerun()
 
-    if st.checkbox("🔎 목표 발음형 미리보기 (자연스러운 음운변동 자동 적용)", key=f"{prefix}_mprev"):
+    # 미리보기는 버튼으로만 계산(타이핑/엔터 리런과 분리 → 입력 중 g2p 호출 없음)
+    prev_key = f"{prefix}_mprevdata"
+    if st.button("🔎 목표 발음형 확인 (자연스러운 음운변동 자동 적용)", key=f"{prefix}_mprev"):
         g2p = get_g2p()
-        prev = [
+        st.session_state[prev_key] = [
             {"목표어": str(r["목표어"]).strip(),
              "목표 발음형(비교 기준)": g2p.to_pronunciation_words(str(r["목표어"]).strip())}
             for _, r in edited.iterrows() if str(r.get("목표어") or "").strip()
         ]
-        if prev:
-            st.dataframe(pd.DataFrame(prev), use_container_width=True, hide_index=True)
-            st.caption("연음(초성우선원리)·평파열음화·경음화·비음화·유음화·격음화·구개음화 등 "
-                       "의무적 음운변동이 목표어에 자동 적용된 발음형입니다. 산출형을 이 발음형과 "
-                       "비교하므로, 자연스러운 변동은 오류로 잡히지 않습니다.")
-        else:
-            st.caption("목표어를 입력하면 비교 기준이 되는 발음형을 미리 볼 수 있습니다.")
+    if st.session_state.get(prev_key):
+        st.dataframe(pd.DataFrame(st.session_state[prev_key]),
+                     use_container_width=True, hide_index=True)
+        st.caption("연음(초성우선원리)·평파열음화·경음화·비음화·유음화·격음화·구개음화 등 "
+                   "의무적 음운변동이 목표어에 자동 적용된 발음형입니다. 산출형을 이 발음형과 "
+                   "비교하므로, 자연스러운 변동은 오류로 잡히지 않습니다. (목표어 수정 후 다시 누르세요)")
 
     out = edited.copy()
     out["화자"] = "아동"
