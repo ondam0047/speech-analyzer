@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21i · 말명료도 + 오류상세 산출어절 + 채우기 버튼 상단 (음절축약 제거)"
+BUILD_TAG = "2026-05-21j · LLM 코멘트에 생활연령 기반 자음·모음 발달 규준 근거 추가"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -115,17 +115,22 @@ def _server_key() -> str:
     return env if env and not env.startswith("sk-...") else ""
 
 
-def _chrono_age(birth, test) -> str:
-    """생년월일·검사일 → 생활연령 'N세 M개월'."""
+def _chrono_age_months(birth, test) -> int | None:
+    """생년월일·검사일 → 생활연령(총 개월). 계산 불가 시 None."""
     if not birth or not test or test < birth:
-        return ""
-    years = test.year - birth.year
-    months = test.month - birth.month
+        return None
+    months = (test.year - birth.year) * 12 + (test.month - birth.month)
     if test.day < birth.day:
         months -= 1
-    if months < 0:
-        years -= 1
-        months += 12
+    return max(months, 0)
+
+
+def _chrono_age(birth, test) -> str:
+    """생년월일·검사일 → 생활연령 'N세 M개월'."""
+    m = _chrono_age_months(birth, test)
+    if m is None:
+        return ""
+    years, months = divmod(m, 12)
     return f"{years}세 {months}개월"
 
 
@@ -163,6 +168,7 @@ def patient_info_sidebar() -> dict:
         "birth": birth.isoformat() if birth else "",
         "test": test.isoformat() if test else "",
         "age": age,
+        "age_months": _chrono_age_months(birth, test),
     }
     st.session_state["patient_info"] = info
     return info

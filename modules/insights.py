@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 
+from modules.norms import reference_text
 from modules.transcription import TranscriptionError, _get_client
 
 APAC_TAXONOMY = (
@@ -85,13 +86,17 @@ def summarize_language(language: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(articulation: dict | None, language: dict | None) -> tuple[str, str]:
+def _build_prompt(articulation: dict | None, language: dict | None,
+                  age_months: int | None = None) -> tuple[str, str]:
     system = (
         "당신은 아동 말·언어 평가를 돕는 언어재활(언어치료) 전문가입니다. "
         "주어진 자동 분석 수치를 임상적으로 해석하되, 단정하지 말고 경향으로 기술하고, "
         "자동 분석의 한계(전사 오류·정렬 잡음 가능)를 전제로 임상가 검수를 권고하세요. "
-        "아래 APAC 음운변동 분류를 참고해 관찰된 패턴이 어떤 변동에 해당할 수 있는지 제시하세요.\n\n"
-        f"[APAC 음운변동 분류]\n{APAC_TAXONOMY}"
+        "아래 APAC 음운변동 분류와 발달 규준을 참고해, 관찰된 패턴이 어떤 변동에 해당할 수 있는지, "
+        "그리고 대상자의 생활연령에 비추어 '연령상 정상 범위'인지 '연령 대비 지연/주목 대상'인지 "
+        "반드시 근거(어떤 자음/변동이 해당 연령에 기대되는지)와 함께 기술하세요.\n\n"
+        f"[APAC 음운변동 분류]\n{APAC_TAXONOMY}\n\n"
+        f"[발달 규준 — 연령 기반 해석 근거]\n{reference_text(age_months)}"
     )
     parts = []
     if articulation is not None:
@@ -100,8 +105,9 @@ def _build_prompt(articulation: dict | None, language: dict | None) -> tuple[str
         parts.append("[언어 분석 요약]\n" + summarize_language(language))
     user = (
         "다음 자동 분석 결과를 바탕으로, ① 두드러진 조음·음운 오류 패턴과 가능한 음운변동 해석, "
-        "② 어휘·구문(언어) 특징, ③ 임상적 제언을 간결한 한국어 불릿으로 정리하세요. "
-        "확실하지 않은 부분은 검수 필요로 표시하세요.\n\n"
+        "② 생활연령 대비 적절성(연령상 정상 vs 주목 대상)을 발달 규준 근거와 함께, "
+        "③ 어휘·구문(언어) 특징, ④ 임상적 제언을 간결한 한국어 불릿으로 정리하세요. "
+        "확실하지 않은 부분은 검수 필요로 표시하고, 최종 판정은 표준화 검사 백분위로 확인하도록 권고하세요.\n\n"
         + "\n\n".join(parts)
     )
     return system, user
@@ -112,13 +118,14 @@ def generate_insight(
     language: dict | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    age_months: int | None = None,
 ) -> str:
     """LLM 임상 코멘트 생성. API 키 미설정 시 TranscriptionError."""
     if articulation is None and language is None:
         raise TranscriptionError("분석 결과가 없습니다.")
     client = _get_client(api_key)
     model = model or os.getenv("INSIGHT_MODEL", "gpt-4o-mini")
-    system, user = _build_prompt(articulation, language)
+    system, user = _build_prompt(articulation, language, age_months)
     try:
         resp = client.chat.completions.create(
             model=model,
