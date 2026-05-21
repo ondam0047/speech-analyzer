@@ -210,6 +210,50 @@ def _build_produced_prompt(few_shot: dict) -> tuple[str, str]:
     return system, user
 
 
+# 선호 audio 모델(접근 가능한 첫 번째를 사용). Secrets의 GPT_AUDIO_MODEL이 최우선.
+_AUDIO_MODEL_PREFS = [
+    "gpt-4o-audio-preview",
+    "gpt-audio",
+    "gpt-4o-mini-audio-preview",
+    "gpt-audio-mini",
+]
+_resolved_audio_model: str | None = None
+
+
+def _is_model_not_found(e: Exception) -> bool:
+    s = str(e).lower()
+    return "model_not_found" in s or "does not exist" in s or "404" in s
+
+
+def _resolve_audio_model(client, exclude: set[str] | None = None) -> str:
+    """이 키로 실제 접근 가능한 audio 모델을 선택(결과 캐시).
+
+    models.list()로 접근 가능한 모델을 조회해, 존재하지 않는 모델로 호출하여
+    404가 나는 상황을 예방한다. 접근 가능한 audio 모델이 없으면 안내 오류.
+    """
+    global _resolved_audio_model
+    exclude = exclude or set()
+    if _resolved_audio_model and _resolved_audio_model not in exclude:
+        return _resolved_audio_model
+    configured = (os.getenv("GPT_AUDIO_MODEL") or "").strip()
+    try:
+        available = {m.id for m in client.models.list().data}
+    except Exception:
+        available = set()
+    for m in ([configured] if configured else []) + _AUDIO_MODEL_PREFS:
+        if m and m not in exclude and (not available or m in available):
+            _resolved_audio_model = m
+            return m
+    audio_models = sorted(a for a in available if "audio" in a.lower() and a not in exclude)
+    if audio_models:
+        _resolved_audio_model = audio_models[0]
+        return audio_models[0]
+    raise TranscriptionError(
+        "이 OpenAI 키로 사용할 수 있는 audio 모델이 없습니다. OpenAI 대시보드(Project)에서 "
+        "gpt-4o-audio-preview 등 audio 모델 접근 권한을 확인하거나, 사용 가능한 audio 모델명을 "
+        "Secrets의 GPT_AUDIO_MODEL로 지정하세요.")
+
+
 def transcribe_produced(
     file_name: str, audio_bytes: bytes, few_shot: dict,
     language: str = "ko", api_key: str | None = None,
@@ -223,12 +267,12 @@ def transcribe_produced(
             f"GPT-4o audio는 wav/mp3만 지원합니다 (현재: {audio_format})."
         )
     client = _get_client(api_key)
-    model = os.getenv("GPT_AUDIO_MODEL", "gpt-4o-audio-preview")
     system, user = _build_produced_prompt(few_shot)
     audio_b64 = base64.b64encode(audio_bytes).decode()
-    try:
-        resp = client.chat.completions.create(
-            model=model,
+
+    def _call(model_name: str):
+        return client.chat.completions.create(
+            model=model_name,
             modalities=["text"],
             messages=[
                 {"role": "system", "content": system},
@@ -239,6 +283,19 @@ def transcribe_produced(
                 ]},
             ],
         )
+
+    model = _resolve_audio_model(client)
+    try:
+        resp = _call(model)
     except Exception as e:
-        raise TranscriptionError(f"산출형 전사 실패: {e}") from e
+        if _is_model_not_found(e):
+            # 다른 접근 가능한 audio 모델로 1회 재시도
+            alt = _resolve_audio_model(client, exclude={model})
+            try:
+                resp = _call(alt)
+            except Exception as e2:
+                raise TranscriptionError(
+                    f"산출형 전사 실패(모델 '{alt}'): {e2}") from e2
+        else:
+            raise TranscriptionError(f"산출형 전사 실패: {e}") from e
     return (resp.choices[0].message.content or "").strip()

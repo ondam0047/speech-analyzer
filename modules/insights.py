@@ -53,12 +53,21 @@ def summarize_articulation(articulation: dict) -> str:
 
 def summarize_language(language: dict) -> str:
     st = language["stats"]
-    return (
+    lines = [
         f"발화 수 {st['utterance_count']}, MLU-w {st['mlu_w']}, MLU-m {st['mlu_m']}, "
-        f"TTR {st['ttr']}, NDW {st['ndw']}, TNW {st['tnw']}\n"
-        f"품사: {st['semantic_counts']}\n"
-        f"문장유형(추정): {st['sentence_types']}"
-    )
+        f"TTR {st['ttr']}, NDW {st['ndw']}, TNW {st['tnw']}",
+        f"품사: {st['semantic_counts']}",
+        f"문법형태소(범주): {st.get('gram_categories', {})}",
+    ]
+    gmf = st.get("gram_morpheme_freq", [])
+    by_cat: dict[str, list[str]] = {}
+    for g in gmf:
+        by_cat.setdefault(g["category"], []).append(f"{g['morpheme']}({g['count']})")
+    for cat in ("연결어미", "어말어미", "전성어미", "선어말어미", "조사"):
+        if by_cat.get(cat):
+            lines.append(f"{cat} 사용형: " + ", ".join(by_cat[cat][:12]))
+    lines.append(f"문장유형(추정): {st['sentence_types']}")
+    return "\n".join(lines)
 
 
 def _build_prompt(articulation: dict | None, language: dict | None) -> tuple[str, str]:

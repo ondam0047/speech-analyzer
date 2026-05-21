@@ -317,6 +317,15 @@ def language_to_excel(result: dict) -> bytes:
     })
     gram = pd.DataFrame({"문법형태소": GRAM_ORDER,
                          "빈도": [stats["gram_categories"][c] for c in GRAM_ORDER]})
+    order = {c: i for i, c in enumerate(GRAM_ORDER)}
+    gmf = stats.get("gram_morpheme_freq", [])
+    gram_form = pd.DataFrame(
+        [{"범주": g["category"], "형태소": g["morpheme"], "빈도": g["count"]} for g in gmf]) \
+        if gmf else pd.DataFrame(columns=["범주", "형태소", "빈도"])
+    if not gram_form.empty:
+        gram_form = (gram_form.assign(_o=gram_form["범주"].map(order).fillna(99))
+                     .sort_values(["_o", "빈도"], ascending=[True, False])
+                     .drop(columns="_o").reset_index(drop=True))
     sent = pd.DataFrame({"문장유형": SENTENCE_TYPES,
                          "발화 수": [stats["sentence_types"][s] for s in SENTENCE_TYPES]})
     buf = io.BytesIO()
@@ -324,6 +333,7 @@ def language_to_excel(result: dict) -> bytes:
         summary.to_excel(xw, sheet_name="요약", index=False)
         sem.to_excel(xw, sheet_name="의미영역", index=False)
         gram.to_excel(xw, sheet_name="문법형태소", index=False)
+        gram_form.to_excel(xw, sheet_name="조사어미빈도", index=False)
         sent.to_excel(xw, sheet_name="문장유형", index=False)
         _language_detail_df(result).to_excel(xw, sheet_name="발화별", index=False)
         _word_freq_df(result).to_excel(xw, sheet_name="낱말빈도", index=False)
@@ -428,7 +438,29 @@ def render_language_results(result: dict) -> None:
     gfig.update_layout(xaxis_title="", coloraxis_showscale=False, height=340)
     st.plotly_chart(gfig, use_container_width=True)
     st.caption("피동·사동 접사는 형태소 분석기가 어간에 병합하여 자동 분리되지 않습니다 (임상가 검수).")
-    with st.expander("문법형태소 상세 (조사·어미 종류별)"):
+
+    st.markdown("**조사·어미 사용 빈도 (형태소별)**")
+    gmf = stats.get("gram_morpheme_freq", [])
+    if gmf:
+        order = {c: i for i, c in enumerate(GRAM_ORDER)}
+        gmf_df = pd.DataFrame(
+            [{"범주": g["category"], "형태소": g["morpheme"], "빈도": g["count"]} for g in gmf])
+        gmf_df = (gmf_df.assign(_o=gmf_df["범주"].map(order).fillna(99))
+                  .sort_values(["_o", "빈도"], ascending=[True, False])
+                  .drop(columns="_o").reset_index(drop=True))
+        conn = gmf_df[gmf_df["범주"] == "연결어미"]
+        if not conn.empty:
+            st.success("🔗 연결어미 사용: "
+                       + ", ".join(f"{r.형태소}({r.빈도})" for r in conn.itertuples()))
+        pick = st.multiselect(
+            "범주 필터", GRAM_ORDER, default=GRAM_ORDER, key="gram_form_filter")
+        view = gmf_df[gmf_df["범주"].isin(pick)] if pick else gmf_df
+        st.dataframe(view, use_container_width=True, hide_index=True)
+        st.caption("연결어미·전성어미 등 어미 형태소의 실제 사용형과 빈도입니다 (임상가 검수).")
+    else:
+        st.info("검출된 조사·어미가 없습니다.")
+
+    with st.expander("문법형태소 상세 (조사·어미 종류별 — 격조사/어미 유형)"):
         gram = stats["grammatical_morphemes"]
         if gram:
             st.dataframe(pd.DataFrame({"종류": list(gram.keys()), "빈도": list(gram.values())}),

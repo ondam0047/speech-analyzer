@@ -116,6 +116,7 @@ class MorphemeAnalyzer:
         sem_counter: Counter[str] = Counter()
         gram_counter: Counter[str] = Counter()
         gram_cat_counter: Counter[str] = Counter()
+        gram_form_counter: Counter[tuple[str, str]] = Counter()  # (형태소, 범주)
         sent_counter: Counter[str] = Counter()
         total_morphemes = 0
         total_words = 0
@@ -137,6 +138,7 @@ class MorphemeAnalyzer:
                     gram_counter[TAG_LABELS.get(base, base)] += 1
                 if base in GRAM_CATEGORY:
                     gram_cat_counter[GRAM_CATEGORY[base]] += 1
+                    gram_form_counter[(t.form, GRAM_CATEGORY[base])] += 1
                 if cat:  # 낱말(내용어)
                     head = _headword(t.form, cat)
                     u_sem[cat] += 1
@@ -186,6 +188,10 @@ class MorphemeAnalyzer:
             "gram_categories": {c: gram_cat_counter.get(c, 0) for c in GRAM_ORDER},
             "sentence_types": {s: sent_counter.get(s, 0) for s in SENTENCE_TYPES},
             "grammatical_morphemes": dict(gram_counter.most_common()),
+            "gram_morpheme_freq": [
+                {"morpheme": form, "category": cat, "count": cnt}
+                for (form, cat), cnt in gram_form_counter.most_common()
+            ],
             "word_freq": [
                 {"word": head, "category": cat, "count": cnt}
                 for (head, cat), cnt in word_counter.most_common()
