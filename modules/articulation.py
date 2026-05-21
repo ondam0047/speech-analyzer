@@ -90,11 +90,6 @@ def _fine_position(ph: dict, last_syl: int) -> str:
 POSITION_ORDER = ["어두초성", "어중초성", "종성"]
 
 
-def _syl_count(word: str) -> int:
-    """어절의 한글 음절 수(g2p 발음형은 음절 수를 보존하므로 목표 음절 수로도 사용)."""
-    return sum(1 for ch in (word or "") if 0xAC00 <= ord(ch) <= 0xD7A3)
-
-
 def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
     g2p = G2PConverter()
     confusion: dict[str, Counter] = defaultdict(Counter)
@@ -113,10 +108,6 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
     # 오류 음운변동(상대분석) 집계
     process_counter: Counter = Counter()
     syllable_omissions = 0
-    # 음절 수 감소(음절축약/생략) — 어절 단위로 목표 발음형 음절 수와 산출 음절 수 비교
-    syllable_reductions = 0
-    syllables_reduced = 0
-    syllable_changes: list[dict] = []
 
     for target_text, produced_text in pairs:
         tw = (target_text or "").split()
@@ -139,19 +130,6 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
             t_phs = word_phonemes(t_pron)
             p_phs = word_phonemes(p_word or "")
             last_syl = max((x["syllable"] for x in t_phs), default=0)
-
-            # 음절 수 감소(음절축약/생략): 산출 음절 수 < 목표 발음형 음절 수
-            if p_word is not None:
-                t_syl = _syl_count(t_pron)
-                p_syl = _syl_count(p_word)
-                if 0 < p_syl < t_syl:
-                    syllable_reductions += 1
-                    syllables_reduced += t_syl - p_syl
-                    syllable_changes.append({
-                        "target_word": t_word, "target_pron": t_pron,
-                        "target_syl": t_syl, "produced_word": p_word,
-                        "produced_syl": p_syl, "reduced": t_syl - p_syl,
-                    })
             ops = _nw_align(
                 [x["jamo"] for x in t_phs], [x["jamo"] for x in p_phs],
                 lambda x, y: 1.0 if x == y else -1.0,
@@ -248,7 +226,6 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
         "vowel_errors": vowel_errors,
         "additions_detail": additions_detail,
         "phonological_processes": phonological_processes,
-        "syllable_changes": syllable_changes,
         "summary": {
             "total_consonants": total,
             "correct_consonants": correct,
@@ -258,7 +235,5 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
             "correct_vowels": vcorrect,
             "vowel_error_count": len(vowel_errors),
             "syllable_omissions": syllable_omissions,
-            "syllable_reductions": syllable_reductions,
-            "syllables_reduced": syllables_reduced,
         },
     }

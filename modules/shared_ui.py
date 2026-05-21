@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21h · 말명료도 + 음절축약 + 오류상세 산출어절 + 채우기 버튼 상단"
+BUILD_TAG = "2026-05-21i · 말명료도 + 오류상세 산출어절 + 채우기 버튼 상단 (음절축약 제거)"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -736,12 +736,6 @@ def articulation_to_excel(result: dict) -> bytes:
         "process": "음운변동"}) \
         if result["errors"] else pd.DataFrame(
             columns=["목표어절", "목표발음", "산출어절", "목표(음소)", "산출(음소)", "위치", "음운변동"])
-    sc = result.get("syllable_changes") or []
-    syl = pd.DataFrame(sc).rename(columns={
-        "target_word": "목표어절", "target_pron": "목표발음", "target_syl": "목표음절",
-        "produced_word": "산출어절", "produced_syl": "산출음절", "reduced": "감소음절"}) \
-        if sc else pd.DataFrame(
-            columns=["목표어절", "목표발음", "목표음절", "산출어절", "산출음절", "감소음절"])
     pp = result.get("phonological_processes") or []
     proc = pd.DataFrame(
         [{"음운변동": x["process"], "유형": x["type"], "빈도": x["count"]} for x in pp]) \
@@ -760,7 +754,6 @@ def articulation_to_excel(result: dict) -> bytes:
         conf.to_excel(xw, sheet_name="컨퓨전매트릭스", index=False)
         proc.to_excel(xw, sheet_name="음운변동", index=False)
         errs.to_excel(xw, sheet_name="오류상세", index=False)
-        syl.to_excel(xw, sheet_name="음절축약", index=False)
         vowel_acc.to_excel(xw, sheet_name="모음정확도", index=False)
         vconf.to_excel(xw, sheet_name="모음컨퓨전", index=False)
     return buf.getvalue()
@@ -980,23 +973,6 @@ def render_articulation_results(result: dict) -> None:
                        "모음은 음절핵이라 생략 불가하므로 음절 단위 생략으로 해석합니다.")
     else:
         st.success("분류된 오류 음운변동이 없습니다.")
-
-    st.divider()
-    st.subheader("음절축약 / 음절 수 감소")
-    st.caption("산출 음절 수가 목표 발음형보다 적은 어절입니다. 음절 전체가 빠지면 음절생략, "
-               "두 음절이 하나로 합쳐지면 음절축약입니다(둘의 구분은 임상가 검수).")
-    sc = result.get("syllable_changes") or []
-    if sc:
-        sm = result["summary"]
-        m1, m2 = st.columns(2)
-        m1.metric("음절 감소 어절 수", sm.get("syllable_reductions", 0))
-        m2.metric("감소한 음절 수(합)", sm.get("syllables_reduced", 0))
-        sc_df = pd.DataFrame(sc).rename(columns={
-            "target_word": "목표어절", "target_pron": "목표발음", "target_syl": "목표음절",
-            "produced_word": "산출어절", "produced_syl": "산출음절", "reduced": "감소음절"})
-        st.dataframe(sc_df, use_container_width=True, hide_index=True)
-    else:
-        st.success("음절 수 감소(축약·생략)가 없습니다.")
 
     va = result.get("vowel_accuracy") or {}
     vcm = result.get("vowel_confusion_matrix") or {}

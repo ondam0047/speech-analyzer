@@ -153,17 +153,6 @@ def _articulation_section(result: dict) -> str:
         out.append("<h3>모음 정확도</h3>")
         out.append(_table(["모음", "정확도(%)"], [[k, v] for k, v in va.items()], left_cols=(0,)))
 
-    sc = result.get("syllable_changes") or []
-    if sc:
-        out.append("<h3>음절축약 / 음절 수 감소</h3>")
-        out.append(_table(
-            ["목표어절", "목표발음", "목표음절", "산출어절", "산출음절", "감소음절"],
-            [[c["target_word"], c["target_pron"], c["target_syl"],
-              c["produced_word"], c["produced_syl"], c["reduced"]] for c in sc],
-            left_cols=(0, 1, 3)))
-        out.append('<p class="muted">음절 전체가 빠지면 음절생략, 두 음절이 하나로 합쳐지면 '
-                   "음절축약입니다 — 구분은 임상가 검수.</p>")
-
     if result["errors"]:
         out.append("<h3>자음 오류 상세</h3>")
         out.append(_table(
