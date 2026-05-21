@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21j · LLM 코멘트에 생활연령 기반 자음·모음 발달 규준 근거 추가"
+BUILD_TAG = "2026-05-21k · 발달 규준 근거를 HTML 보고서에도 추가"
 
 
 def g2p_self_test() -> tuple[bool, str]:

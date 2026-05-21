@@ -10,6 +10,13 @@ from datetime import date
 
 from modules.articulation import POSITION_ORDER
 from modules.morpheme import BROAD_OF, GRAM_ORDER, SEMANTIC_ORDER, SENTENCE_TYPES
+from modules.norms import (
+    ATYPICAL_NOTE,
+    CONSONANT_STAGE_TABLE,
+    REFERENCES,
+    VOWEL_NOTE,
+    developmental_reference,
+)
 
 _CSS = """
 body{font-family:'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo',sans-serif;color:#1a1a1a;
@@ -178,6 +185,36 @@ def _intelligibility_section(intel: dict) -> str:
     return "\n".join(out)
 
 
+def _norms_section(age_months: int | None) -> str:
+    out = ["<h2>📚 발달 규준 (해석 근거)</h2>"]
+    out.append("<h3>자음 완전습득(95~100%) 기대 연령 — 김영태(1996)</h3>")
+    out.append(_table(["연령", "완전습득 자음"], [[b, c] for b, c in CONSONANT_STAGE_TABLE],
+                      left_cols=(0, 1)))
+    ref = developmental_reference(age_months)
+    if ref:
+        y, m = divmod(ref["age_months"], 12)
+        out.append(f"<h3>생활연령 {y}세 {m}개월 기준 비교</h3>")
+        out.append(_table(
+            ["항목", "내용"],
+            [["완전습득 기대 자음 (오류 시 주목)", ", ".join(ref["mastered_expected"]) or "없음"],
+             ["아직 발달 중 (연령상 정상 가능)", ", ".join(ref["developing"]) or "없음"],
+             ["사라졌어야 할 발달적 음운변동",
+              ", ".join(ref["processes_should_resolve"]) or "해당 없음"],
+             ["연령 기대 자음정확도(PCC)", ref["expected_pcc"]],
+             ["연령 기대 말명료도", ref["expected_intelligibility"]]],
+            left_cols=(0, 1)))
+        out.append('<p class="muted">관찰된 오류가 ‘연령상 정상 범위’인지 ‘연령 대비 지연/주목 '
+                   "대상’인지의 해석 근거입니다. 최종 판정은 표준화 검사(U-TAP2/APAC) 백분위로 "
+                   "확인해야 합니다.</p>")
+    else:
+        out.append('<p class="muted">생활연령 미입력 — 연령 대비 비교는 제한적입니다.</p>')
+    out.append(f'<p class="muted"><b>모음</b> {_esc(VOWEL_NOTE)}</p>')
+    out.append(f'<p class="muted"><b>비전형 패턴</b> {_esc(ATYPICAL_NOTE)}</p>')
+    out.append("<h3>참고 문헌</h3>")
+    out.append('<p class="muted">' + "<br>".join(_esc(r) for r in REFERENCES) + "</p>")
+    return "\n".join(out)
+
+
 def _patient_section(patient: dict) -> str:
     items = []
     if patient.get("name"):
@@ -207,6 +244,7 @@ def build_report_html(language: dict | None = None, articulation: dict | None = 
         sections.append(_language_section(language))
     if articulation is not None:
         sections.append(_articulation_section(articulation))
+        sections.append(_norms_section((patient or {}).get("age_months")))
     if not sections:
         sections.append("<p>분석 결과가 없습니다.</p>")
     body = "\n".join(sections)
