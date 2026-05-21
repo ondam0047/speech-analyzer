@@ -6,7 +6,12 @@ import sys
 import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from modules.shared_ui import api_key_input, require_password  # noqa: E402
+from modules.shared_ui import (  # noqa: E402
+    BUILD_TAG,
+    api_key_input,
+    g2p_self_test,
+    require_password,
+)
 
 st.set_page_config(
     page_title="자발화 분석 도구",
@@ -18,6 +23,16 @@ api_key_input()
 
 st.title("🎙️ 자발화 분석 도구")
 st.caption("언어치료 자발화 분석 — 음성/텍스트 → 형태소·조음 분석 → 보고서 (로컬 도구)")
+
+with st.expander("🔧 배포 확인 / g2p 작동 테스트", expanded=False):
+    st.caption(f"빌드 태그: **{BUILD_TAG}**  ← 이 태그가 보이면 최신 코드가 배포된 것입니다.")
+    if st.button("g2p 작동 확인 (국물 → 궁물)"):
+        ok, out = g2p_self_test()
+        if ok:
+            st.success(f"✅ g2p 정상 작동: 국물 → {out} (발음형 변환·조음 분석 정상)")
+        else:
+            st.error(f"⚠️ g2p 미작동: 국물 → {out}  "
+                     "(cmudict 미적용/리빌드 미완료 가능 → Manage app에서 Reboot)")
 
 st.markdown("### 1단계 · 전사 (선택)")
 with st.container(border=True):

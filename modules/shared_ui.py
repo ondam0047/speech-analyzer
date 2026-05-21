@@ -33,6 +33,18 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 전사 페이지 → 언어/조음 분석으로 넘기는 아동 발화(목표어) 세션 키
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
+# 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
+BUILD_TAG = "2026-05-21c · g2p cmudict 번들 + 표 입력유실/미리보기 수정"
+
+
+def g2p_self_test() -> tuple[bool, str]:
+    """g2p가 배포 환경에서 실제로 동작하는지 확인(국물→궁물)."""
+    try:
+        out = get_g2p().to_pronunciation("국물")
+        return (out == "궁물"), out
+    except Exception as e:  # pragma: no cover
+        return False, f"로드 오류: {e}"
+
 
 @st.cache_resource(show_spinner="형태소 분석기 로딩 중…")
 def get_analyzer() -> MorphemeAnalyzer:
