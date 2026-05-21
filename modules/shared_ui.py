@@ -36,6 +36,12 @@ def get_analyzer() -> MorphemeAnalyzer:
     return MorphemeAnalyzer()
 
 
+@st.cache_resource(show_spinner="g2p 발음 변환기 로딩 중…")
+def get_g2p():
+    from modules.g2p import G2PConverter
+    return G2PConverter()
+
+
 @st.cache_data
 def load_few_shot() -> dict:
     with open(os.path.join(_ROOT, "data", "few_shot_examples.json"), encoding="utf-8") as f:
@@ -302,6 +308,75 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
                "어절 수에 맞춰 함께 분리합니다(시간·화자 유지). 산출형에도 마침표가 있으면 그 기준을 우선합니다. "
                "자동 생성은 빈 산출형(아동)만 채우며 입력한 산출형은 보존됩니다.")
     return edited
+
+
+_MANUAL_SAMPLE = [
+    {"목표어": "사슴", "산출형": "다듬"},
+    {"목표어": "색종이", "산출형": "택똥이"},
+    {"목표어": "먹어요", "산출형": "머거요"},
+    {"목표어": "토끼가 풀을 먹어요", "산출형": "토띠가 푸을 머거요"},
+]
+
+
+def manual_dual_entry(prefix: str) -> pd.DataFrame:
+    """음성 없이 목표어/산출형을 직접 입력하는 검수 표(조음·통합).
+
+    임상가가 귀로 들은 산출형을 직접 전사한다. 목표어(표준 철자)에는 g2p가
+    자연스러운 음운변동(연음·경음화·비음화 등)을 자동 적용하므로, 자연 변동은
+    오류로 잡히지 않는다. 반환: 화자/목표어/산출형 DataFrame.
+    """
+    rows_key, ver_key = f"{prefix}_mrows", f"{prefix}_mver"
+    if rows_key not in st.session_state:
+        st.session_state[rows_key] = [{"목표어": "", "산출형": ""} for _ in range(6)]
+
+    st.markdown(
+        "**직접 입력** — 한 줄에 한 낱말/발화. **목표어**는 표준 철자(예: `먹어요`), "
+        "**산출형**은 아동이 실제로 낸 발음을 들리는 대로(예: `머거요`) 한글로 적습니다.")
+    if st.button("예시 불러오기", key=f"{prefix}_msample"):
+        st.session_state[rows_key] = [dict(r) for r in _MANUAL_SAMPLE]
+        st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+        st.rerun()
+
+    ver = st.session_state.get(ver_key, 0)
+    df = pd.DataFrame(st.session_state[rows_key], columns=["목표어", "산출형"])
+    edited = st.data_editor(
+        df, key=f"{prefix}_mtable_{ver}", use_container_width=True, hide_index=True,
+        num_rows="dynamic",
+        column_config={
+            "목표어": st.column_config.TextColumn("목표어 (표준 철자)", width="medium"),
+            "산출형": st.column_config.TextColumn("산출형 (들리는 실제 발음)", width="medium"),
+        },
+    )
+
+    if st.button("✂️ 발화 나누기 (목표어 기준 · 산출형 동반)", key=f"{prefix}_msplit"):
+        new_rows = []
+        for _, r in edited.iterrows():
+            for tgt, prod in _split_pair(r.get("목표어"), r.get("산출형")):
+                if tgt or prod:
+                    new_rows.append({"목표어": tgt, "산출형": prod})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+
+    with st.expander("🔎 목표 발음형 미리보기 (자연스러운 음운변동 자동 적용)"):
+        g2p = get_g2p()
+        prev = [
+            {"목표어": str(r["목표어"]).strip(),
+             "목표 발음형(비교 기준)": g2p.to_pronunciation(str(r["목표어"]).strip())}
+            for _, r in edited.iterrows() if str(r.get("목표어") or "").strip()
+        ]
+        if prev:
+            st.dataframe(pd.DataFrame(prev), use_container_width=True, hide_index=True)
+            st.caption("연음(초성우선원리)·평파열음화·경음화·비음화·유음화·격음화·구개음화 등 "
+                       "의무적 음운변동이 목표어에 자동 적용된 발음형입니다. 산출형을 이 발음형과 "
+                       "비교하므로, 자연스러운 변동은 오류로 잡히지 않습니다.")
+        else:
+            st.caption("목표어를 입력하면 비교 기준이 되는 발음형을 미리 볼 수 있습니다.")
+
+    out = edited.copy()
+    out["화자"] = "아동"
+    return out
 
 
 # ---------- 엑셀 내보내기 ----------

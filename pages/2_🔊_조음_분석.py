@@ -11,6 +11,7 @@ from modules.insights import generate_insight, summarize_articulation  # noqa: E
 from modules.shared_ui import (  # noqa: E402
     api_key_input,
     child_pairs,
+    manual_dual_entry,
     render_articulation_results,
     require_password,
     voice_dual_review,
@@ -22,9 +23,14 @@ require_password()
 api_key = api_key_input()
 
 st.title("🔊 조음 분석")
-st.caption("음성 → 듀얼 전사(Whisper 목표어 + GPT-4o audio 산출형) → 임상가 검수 → PCC·컨퓨전 매트릭스")
+st.caption("목표어/산출형 듀얼 전사 → 임상가 검수 → PCC·PVC·컨퓨전 매트릭스·오류 음운변동")
 
-edited = voice_dual_review("artic", api_key)
+mode = st.radio("입력 방식", ["직접 입력 (권장)", "음성 업로드 (자동 전사)"],
+                horizontal=True, key="artic_mode")
+if mode.startswith("직접"):
+    edited = manual_dual_entry("artic")
+else:
+    edited = voice_dual_review("artic", api_key)
 
 if edited is not None and st.button("📊 분석 실행", type="primary"):
     pairs = child_pairs(edited)
