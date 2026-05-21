@@ -224,13 +224,17 @@ def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
     st.markdown("**발화별 검수** — 화자(아동/치료사/제외) 지정 · 전사 수정 · "
                 "한 칸에 여러 문장이 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’")
     ver = st.session_state.get(ver_key, 0)
-    df = pd.DataFrame([
-        {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
-         "화자": r["화자"], "전사": r["전사"]}
-        for i, r in enumerate(rows)
-    ])
+    # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다.
+    disp_key = f"{prefix}_tdisp_{ver}"
+    if disp_key not in st.session_state:
+        st.session_state[disp_key] = pd.DataFrame([
+            {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
+             "화자": r["화자"], "전사": r["전사"]}
+            for i, r in enumerate(rows)
+        ])
     edited = st.data_editor(
-        df, key=f"{prefix}_ttable_{ver}", use_container_width=True, hide_index=True,
+        st.session_state[disp_key], key=f"{prefix}_ttable_{ver}",
+        use_container_width=True, hide_index=True,
         num_rows="dynamic", disabled=["#", "시간"],
         column_config={
             "화자": st.column_config.SelectboxColumn(
@@ -312,13 +316,17 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
         "산출형도 어절 단위로 함께 나뉩니다.")
 
     ver = st.session_state.get(ver_key, 0)
-    df = pd.DataFrame([
-        {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
-         "화자": r["화자"], "목표어": r["목표어"], "산출형": r["산출형"]}
-        for i, r in enumerate(rows)
-    ])
+    # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다.
+    disp_key = f"{prefix}_disp_{ver}"
+    if disp_key not in st.session_state:
+        st.session_state[disp_key] = pd.DataFrame([
+            {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
+             "화자": r["화자"], "목표어": r["목표어"], "산출형": r["산출형"]}
+            for i, r in enumerate(rows)
+        ])
     edited = st.data_editor(
-        df, key=f"{prefix}_table_{ver}", use_container_width=True, hide_index=True,
+        st.session_state[disp_key], key=f"{prefix}_table_{ver}",
+        use_container_width=True, hide_index=True,
         num_rows="dynamic", disabled=["#", "시간"],
         column_config={
             "화자": st.column_config.SelectboxColumn(
@@ -495,10 +503,15 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
         st.rerun()
 
     ver = st.session_state.get(ver_key, 0)
-    df = pd.DataFrame(st.session_state[rows_key], columns=["목표어", "산출형"])
+    # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다
+    # (매 리런마다 새 DataFrame을 넘기면 편집 내용이 초기화됨).
+    disp_key = f"{prefix}_mdisp_{ver}"
+    if disp_key not in st.session_state:
+        st.session_state[disp_key] = pd.DataFrame(
+            st.session_state[rows_key], columns=["목표어", "산출형"])
     edited = st.data_editor(
-        df, key=f"{prefix}_mtable_{ver}", use_container_width=True, hide_index=True,
-        num_rows="dynamic",
+        st.session_state[disp_key], key=f"{prefix}_mtable_{ver}",
+        use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "목표어": st.column_config.TextColumn("목표어 (표준 철자)", width="medium"),
             "산출형": st.column_config.TextColumn("산출형 (들리는 실제 발음)", width="medium"),
@@ -516,7 +529,7 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             st.session_state[ver_key] = ver + 1
             st.rerun()
 
-    with st.expander("🔎 목표 발음형 미리보기 (자연스러운 음운변동 자동 적용)"):
+    if st.checkbox("🔎 목표 발음형 미리보기 (자연스러운 음운변동 자동 적용)", key=f"{prefix}_mprev"):
         g2p = get_g2p()
         prev = [
             {"목표어": str(r["목표어"]).strip(),
