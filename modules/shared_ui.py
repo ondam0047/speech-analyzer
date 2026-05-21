@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21p · LLM 임상 코멘트 제거(무료 규준 비교 보고서로 대체)"
+BUILD_TAG = "2026-05-21q · 전사 검수에 발화 합치기(⬆합치기) 추가"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -281,14 +281,15 @@ def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
         return None
 
     st.markdown("**발화별 검수** — 화자(아동/치료사/제외) 지정 · 전사 수정 · "
-                "한 칸에 여러 문장이 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’")
+                "한 칸에 여러 문장이 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’ · "
+                "끊긴 발화는 ‘⬆합치기’를 체크하고 ‘🔗 발화 합치기’")
     ver = st.session_state.get(ver_key, 0)
     # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다.
     disp_key = f"{prefix}_tdisp_{ver}"
     if disp_key not in st.session_state:
         st.session_state[disp_key] = pd.DataFrame([
             {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
-             "화자": r["화자"], "전사": r["전사"]}
+             "화자": r["화자"], "전사": r["전사"], "⬆합치기": False}
             for i, r in enumerate(rows)
         ])
     edited = st.data_editor(
@@ -299,16 +300,38 @@ def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
             "화자": st.column_config.SelectboxColumn(
                 "화자", options=["아동", "치료사", "제외"], required=True, width="small"),
             "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
+            "⬆합치기": st.column_config.CheckboxColumn(
+                "⬆합치기", help="체크한 행을 바로 위 발화에 합칩니다", width="small", default=False),
         },
     )
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
-    if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_tsplit"):
+    c_split, c_merge = st.columns(2)
+    if c_split.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_tsplit",
+                      use_container_width=True):
         new_rows = []
         for _, r in edited.iterrows():
             start, end = _se_of(r.get("시간"), lookup)
             spk = r.get("화자") or "아동"
             for part in split_sentences(r.get("전사")):
                 new_rows.append({"start": start, "end": end, "화자": spk, "전사": part})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+    if c_merge.button("🔗 발화 합치기 (⬆합치기 체크한 행을 위에 붙임)", key=f"{prefix}_tmerge",
+                      use_container_width=True):
+        new_rows: list[dict] = []
+        for _, r in edited.iterrows():
+            start, end = _se_of(r.get("시간"), lookup)
+            spk = r.get("화자") or "아동"
+            text = str(r.get("전사") or "").strip()
+            if bool(r.get("⬆합치기")) and new_rows:
+                prev = new_rows[-1]
+                prev["전사"] = (prev["전사"] + " " + text).strip()
+                prev["end"] = max(prev["end"], end)
+            else:
+                new_rows.append({"start": start, "end": end, "화자": spk, "전사": text})
+        new_rows = [r for r in new_rows if r["전사"]]
         if new_rows:
             st.session_state[rows_key] = new_rows
             st.session_state[ver_key] = ver + 1
