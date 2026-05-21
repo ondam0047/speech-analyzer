@@ -1,4 +1,4 @@
-"""한국 아동 말소리(자음·모음) 발달 규준 — LLM 임상 코멘트의 연령 기반 근거.
+"""한국 아동 말소리(자음·모음) 발달 규준 — 보고서·화면의 연령 기반 해석 근거.
 
 생활연령 대비 '연령에 적절한 오류'인지 '주목해야 할 오류'인지 판단할 근거를 제공한다.
 규준은 참고용이며, 공식 판정은 표준화 검사(U-TAP2/APAC)의 백분위/표준점수로 해야 한다.
@@ -109,7 +109,7 @@ def developmental_reference(age_months: int | None) -> dict | None:
 
 
 def reference_text(age_months: int | None) -> str:
-    """LLM 프롬프트용 연령 기반 발달 규준 텍스트."""
+    """화면·보고서 표시용 연령 기반 발달 규준 텍스트."""
     stage = "\n".join(f"  · {band}: {cs}" for band, cs in CONSONANT_STAGE_TABLE)
     head = (
         "[자음 완전습득(95~100%) 기대 연령 — 김영태(1996)]\n"
@@ -212,7 +212,7 @@ def language_reference(age_months: int | None) -> dict | None:
 
 
 def language_reference_text(age_months: int | None) -> str:
-    """LLM 프롬프트용 언어 발달 규준 텍스트."""
+    """화면·보고서 표시용 언어 발달 규준 텍스트."""
     base = (
         "[표현언어 발달 — 일반 경향]\n"
         "  · MLU(평균발화길이)는 연령과 강한 상관(연령↑ → MLU↑). "

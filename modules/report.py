@@ -37,7 +37,6 @@ td.l,th.l{text-align:left}
 .muted{color:#777;font-size:12px;margin:4px 0}
 .atyp{color:#c0392b;font-weight:700}
 .tag{display:inline-block;background:#eef3f8;border:1px solid #dbe6f0;border-radius:10px;padding:1px 8px;margin:2px;font-size:12px}
-.insight{white-space:pre-wrap;background:#f7faf7;border:1px solid #d6e6d6;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.6}
 @media print{body{margin:0}h2{break-after:avoid}}
 """
 
@@ -242,14 +241,6 @@ def _language_norms_section(age_months: int | None) -> str:
     return "\n".join(out)
 
 
-def _insight_section(insight: str) -> str:
-    body = _esc(insight)
-    return ('<h2>🧠 LLM 임상 코멘트 (참고)</h2>'
-            f'<div class="insight">{body}</div>'
-            '<p class="muted">AI가 생성한 해석으로 임상가 검수가 필요합니다. '
-            "최종 판정은 표준화 검사 결과로 확인하세요.</p>")
-
-
 def _patient_section(patient: dict) -> str:
     items = []
     if patient.get("name"):
@@ -267,7 +258,6 @@ def _patient_section(patient: dict) -> str:
 
 def build_report_html(language: dict | None = None, articulation: dict | None = None,
                       patient: dict | None = None, intelligibility: dict | None = None,
-                      insight: str | None = None,
                       title: str = "자발화 분석 보고서") -> str:
     age_months = (patient or {}).get("age_months")
     sections = []
@@ -283,8 +273,6 @@ def build_report_html(language: dict | None = None, articulation: dict | None = 
     if articulation is not None:
         sections.append(_articulation_section(articulation))
         sections.append(_norms_section(age_months))
-    if insight:
-        sections.append(_insight_section(insight))
     if not sections:
         sections.append("<p>분석 결과가 없습니다.</p>")
     body = "\n".join(sections)

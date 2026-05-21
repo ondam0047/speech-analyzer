@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21o · 말명료도를 조음 분석으로 이동(목표어 기준), 언어에서 제거"
+BUILD_TAG = "2026-05-21p · LLM 임상 코멘트 제거(무료 규준 비교 보고서로 대체)"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -649,23 +649,13 @@ def report_download_button(language: dict | None = None,
     patient = st.session_state.get("patient_info") or {}
     # 말명료도는 조음 지표 — 조음 보고서에만 포함
     intelligibility = st.session_state.get("intelligibility") if articulation is not None else None
-    # 생성된 LLM 임상 코멘트를 보고서에 함께 포함(조음=artic_insight, 언어=lang_insight)
-    if articulation is not None:
-        insight = st.session_state.get("artic_insight")
-    elif language is not None:
-        insight = st.session_state.get("lang_insight")
-    else:
-        insight = None
     doc = build_report_html(language=language, articulation=articulation, patient=patient,
-                            intelligibility=intelligibility, insight=insight)
+                            intelligibility=intelligibility)
     safe = "".join(c for c in (patient.get("name") or "자발화") if c.isalnum() or c in " _-").strip()
     st.download_button(
         "📄 HTML 보고서 저장", data=doc.encode("utf-8"),
         file_name=f"{safe or '자발화'}_분석보고서.html", mime="text/html", key=f"rep_{key}")
-    msg = "다운로드한 HTML을 브라우저에서 열고 인쇄(Ctrl+P) → ‘PDF로 저장’하면 PDF가 됩니다."
-    msg += (" LLM 임상 코멘트도 함께 포함됩니다." if insight
-            else " (LLM 임상 코멘트를 생성하면 보고서에 함께 포함됩니다.)")
-    st.caption(msg)
+    st.caption("다운로드한 HTML을 브라우저에서 열고 인쇄(Ctrl+P) → ‘PDF로 저장’하면 PDF가 됩니다.")
 
 
 def _language_detail_df(result: dict) -> pd.DataFrame:
