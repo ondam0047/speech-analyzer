@@ -533,7 +533,7 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
         g2p = get_g2p()
         prev = [
             {"목표어": str(r["목표어"]).strip(),
-             "목표 발음형(비교 기준)": g2p.to_pronunciation(str(r["목표어"]).strip())}
+             "목표 발음형(비교 기준)": g2p.to_pronunciation_words(str(r["목표어"]).strip())}
             for _, r in edited.iterrows() if str(r.get("목표어") or "").strip()
         ]
         if prev:
