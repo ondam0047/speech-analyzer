@@ -5,7 +5,9 @@
   1. 목표어 → 발음형(g2p)
   2. 어절 정렬 → 어절 내 음소(자모) 정렬(Needleman-Wunsch)
   3. 자음(초성·종성, 초성 ㅇ 제외) 기준으로 컨퓨전 매트릭스 / PCC / 위치별 오류 산출
-산출: confusion_matrix, position_errors, pcc, phoneme_accuracy, errors
+  4. 모음(중성)은 PCC와 분리해 PVC(모음정확도)로 별도 집계
+산출: confusion_matrix, position_errors, pcc, phoneme_accuracy, errors,
+      pvc, vowel_accuracy, vowel_confusion_matrix, vowel_errors, additions_detail
 """
 
 from __future__ import annotations
@@ -82,7 +84,13 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
     phoneme_total: Counter = Counter()
     phoneme_correct: Counter = Counter()
     errors: list[dict] = []
+    # 모음(중성) — 자음 PCC와 별도 집계(PVC)
+    vowel_confusion: dict[str, Counter] = defaultdict(Counter)
+    vowel_total: Counter = Counter()
+    vowel_correct: Counter = Counter()
+    vowel_errors: list[dict] = []
     additions = 0
+    additions_detail: list[dict] = []
 
     for target_text, produced_text in pairs:
         tw = (target_text or "").split()
@@ -91,7 +99,15 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
             t_word = tw[ti] if ti is not None else None
             p_word = pw[pj] if pj is not None else None
             if t_word is None:
-                continue  # 산출 측 잉여 어절(첨가) — 상세 생략
+                # 목표어 없는 산출 어절 전체가 첨가 — 자음만 카운트(상세 포함)
+                for pph in word_phonemes(p_word or ""):
+                    if _is_consonant(pph):
+                        additions += 1
+                        additions_detail.append({
+                            "produced": pph["jamo"], "position": _position(pph),
+                            "word": p_word,
+                        })
+                continue
             t_phs = word_phonemes(g2p.to_pronunciation(t_word))
             p_phs = word_phonemes(p_word or "")
             ops = _nw_align(
@@ -104,23 +120,36 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
                 if tph is None:
                     if pph is not None and _is_consonant(pph):
                         additions += 1
-                    continue
-                if not _is_consonant(tph):
+                        additions_detail.append({
+                            "produced": pph["jamo"], "position": _position(pph),
+                            "word": p_word,
+                        })
                     continue
                 target_j = tph["jamo"]
-                pos = _position(tph)
-                phoneme_total[target_j] += 1
-                position_total[pos] += 1
-                if pph is not None and pph["jamo"] == target_j:
-                    phoneme_correct[target_j] += 1
-                else:
-                    produced_j = pph["jamo"] if pph is not None else OMISSION
-                    confusion[target_j][produced_j] += 1
-                    position_errors[pos] += 1
-                    errors.append({
-                        "target": target_j, "produced": produced_j,
-                        "position": pos, "word": t_word,
-                    })
+                if _is_consonant(tph):
+                    pos = _position(tph)
+                    phoneme_total[target_j] += 1
+                    position_total[pos] += 1
+                    if pph is not None and pph["jamo"] == target_j:
+                        phoneme_correct[target_j] += 1
+                    else:
+                        produced_j = pph["jamo"] if pph is not None else OMISSION
+                        confusion[target_j][produced_j] += 1
+                        position_errors[pos] += 1
+                        errors.append({
+                            "target": target_j, "produced": produced_j,
+                            "position": pos, "word": t_word,
+                        })
+                elif tph["kind"] == "중성":  # 모음
+                    vowel_total[target_j] += 1
+                    if pph is not None and pph["jamo"] == target_j:
+                        vowel_correct[target_j] += 1
+                    else:
+                        produced_j = pph["jamo"] if pph is not None else OMISSION
+                        vowel_confusion[target_j][produced_j] += 1
+                        vowel_errors.append({
+                            "target": target_j, "produced": produced_j, "word": t_word,
+                        })
 
     total = sum(phoneme_total.values())
     correct = sum(phoneme_correct.values())
@@ -128,6 +157,13 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
     phoneme_accuracy = {
         ph: round(phoneme_correct[ph] / phoneme_total[ph] * 100, 1)
         for ph in sorted(phoneme_total, key=lambda p: -phoneme_total[p])
+    }
+    vtotal = sum(vowel_total.values())
+    vcorrect = sum(vowel_correct.values())
+    pvc = round(vcorrect / vtotal * 100, 1) if vtotal else 0.0
+    vowel_accuracy = {
+        ph: round(vowel_correct[ph] / vowel_total[ph] * 100, 1)
+        for ph in sorted(vowel_total, key=lambda p: -vowel_total[p])
     }
 
     return {
@@ -137,10 +173,18 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
         "pcc": pcc,
         "phoneme_accuracy": phoneme_accuracy,
         "errors": errors,
+        "pvc": pvc,
+        "vowel_accuracy": vowel_accuracy,
+        "vowel_confusion_matrix": {t: dict(c) for t, c in vowel_confusion.items()},
+        "vowel_errors": vowel_errors,
+        "additions_detail": additions_detail,
         "summary": {
             "total_consonants": total,
             "correct_consonants": correct,
             "error_count": len(errors),
             "additions": additions,
+            "total_vowels": vtotal,
+            "correct_vowels": vcorrect,
+            "vowel_error_count": len(vowel_errors),
         },
     }

@@ -24,18 +24,30 @@ def summarize_articulation(articulation: dict) -> str:
         f"(정확 {s['correct_consonants']}/{s['total_consonants']}, 오류 {s['error_count']}, 첨가 {s['additions']})",
         f"위치별 오류: {articulation['position_errors']} / 전체 {articulation['position_total']}",
     ]
+    if s.get("total_vowels"):
+        lines.append(
+            f"PVC(모음정확도): {articulation.get('pvc', 0.0)}% "
+            f"(정확 {s.get('correct_vowels', 0)}/{s['total_vowels']}, 오류 {s.get('vowel_error_count', 0)})")
     pairs = []
     for tgt, row in articulation["confusion_matrix"].items():
         for prod, cnt in row.items():
             pairs.append((cnt, f"{tgt}→{prod}"))
     pairs.sort(reverse=True)
     if pairs:
-        lines.append("주요 오류 패턴(목표→산출, 빈도순): "
+        lines.append("주요 자음 오류 패턴(목표→산출, 빈도순): "
                      + ", ".join(f"{p} ({c})" for c, p in pairs[:12]))
     low = [(acc, ph) for ph, acc in articulation["phoneme_accuracy"].items() if acc < 100]
     low.sort()
     if low:
-        lines.append("정확도 낮은 음소: " + ", ".join(f"{ph} {acc}%" for acc, ph in low[:10]))
+        lines.append("정확도 낮은 자음: " + ", ".join(f"{ph} {acc}%" for acc, ph in low[:10]))
+    vpairs = []
+    for tgt, row in (articulation.get("vowel_confusion_matrix") or {}).items():
+        for prod, cnt in row.items():
+            vpairs.append((cnt, f"{tgt}→{prod}"))
+    vpairs.sort(reverse=True)
+    if vpairs:
+        lines.append("주요 모음 오류 패턴(목표→산출, 빈도순): "
+                     + ", ".join(f"{p} ({c})" for c, p in vpairs[:8]))
     return "\n".join(lines)
 
 

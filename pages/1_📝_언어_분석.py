@@ -16,6 +16,7 @@ from modules.shared_ui import (  # noqa: E402
     get_analyzer,
     render_language_results,
     require_password,
+    split_sentences,
 )
 from modules.transcription import (  # noqa: E402
     TranscriptionError,
@@ -65,29 +66,52 @@ else:  # 음성 업로드 (언어 분석은 목표어만 필요)
                 with st.spinner("Whisper 전사 중…"):
                     segs = transcribe_target(
                         uploaded.name, uploaded.getvalue(), api_key=api_key)
-                st.session_state["lang_voice_segments"] = segs
+                st.session_state["lang_rows"] = [
+                    {"start": s["start"], "end": s["end"], "화자": "아동", "전사": s["text"]}
+                    for s in segs
+                ]
+                st.session_state["lang_ver"] = st.session_state.get("lang_ver", 0) + 1
                 st.success(f"{len(segs)}개 발화 전사 완료. 화자를 지정하고 검수하세요.")
             except TranscriptionError as e:
                 st.error(str(e))
 
-    segs = st.session_state.get("lang_voice_segments")
-    if segs:
-        st.markdown("**발화별 검수** — 화자 지정 + 표준어 수정 · 행 추가/삭제로 발화 분리·병합")
+    rows = st.session_state.get("lang_rows")
+    if rows:
+        st.markdown("**발화별 검수** — 화자 지정 + 표준어 수정 · "
+                    "한 칸에 여러 문장이 붙어 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’로 분리")
+        ver = st.session_state.get("lang_ver", 0)
         base_df = pd.DataFrame([
-            {"#": s["index"], "시간": f"{format_ts(s['start'])}–{format_ts(s['end'])}",
-             "화자": "아동", "전사": s["text"]}
-            for s in segs
+            {"#": i + 1, "시간": f"{format_ts(r['start'])}–{format_ts(r['end'])}",
+             "화자": r["화자"], "전사": r["전사"]}
+            for i, r in enumerate(rows)
         ])
         edited_df = st.data_editor(
-            base_df, key="lang_voice_table", use_container_width=True, hide_index=True,
+            base_df, key=f"lang_voice_table_{ver}", use_container_width=True, hide_index=True,
             num_rows="dynamic", disabled=["#", "시간"],
             column_config={
                 "화자": st.column_config.SelectboxColumn(
                     "화자", options=["아동", "치료사", "제외"], required=True, width="small"),
                 "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
             })
+        time_lookup = {
+            f"{format_ts(r['start'])}–{format_ts(r['end'])}": (r["start"], r["end"])
+            for r in rows
+        }
+        if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)"):
+            new_rows = []
+            for _, r in edited_df.iterrows():
+                t = r.get("시간")
+                start, end = time_lookup.get("" if pd.isna(t) else str(t), (0.0, 0.0))
+                spk = r.get("화자") or "아동"
+                for part in split_sentences(r.get("전사")):
+                    new_rows.append({"start": start, "end": end, "화자": spk, "전사": part})
+            if new_rows:
+                st.session_state["lang_rows"] = new_rows
+                st.session_state["lang_ver"] = ver + 1
+                st.rerun()
         n_child = int((edited_df["화자"] == "아동").sum())
-        st.caption(f"아동 발화로 지정된 항목: {n_child}개 (이 항목만 분석)")
+        st.caption(f"아동 발화로 지정된 항목: {n_child}개 (이 항목만 분석) · "
+                   "‘발화 나누기’는 모든 행을 문장 단위로 다시 나눕니다.")
         if st.button("분석 실행", type="primary"):
             child = edited_df[edited_df["화자"] == "아동"]
             utterances = [t for t in child["전사"].tolist() if str(t).strip()]

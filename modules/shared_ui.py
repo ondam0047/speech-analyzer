@@ -6,6 +6,7 @@ import hmac
 import io
 import json
 import os
+import re
 
 import pandas as pd
 import plotly.express as px
@@ -113,6 +114,25 @@ def api_key_input() -> str:
 
 # ---------- 음성 듀얼 검수 (목표어/산출형) : 조음·통합 공용 ----------
 
+_SENT_BOUNDARY = re.compile(r"[.!?。！？]+\s*|\n+")
+
+
+def split_sentences(text) -> list[str]:
+    """텍스트를 마침표·물음표·느낌표·줄바꿈 기준으로 분리(빈 조각 제외)."""
+    parts = [p.strip() for p in _SENT_BOUNDARY.split(str(text or ""))]
+    return [p for p in parts if p]
+
+
+def _time_label(start: float, end: float) -> str:
+    return f"{format_ts(start)}–{format_ts(end)}"
+
+
+def _se_of(time_str, lookup: dict) -> tuple[float, float]:
+    """편집된 행의 '시간' 문자열 → (start, end). 수동 추가 행은 (0, 0)."""
+    key = "" if pd.isna(time_str) else str(time_str)
+    return lookup.get(key, (0.0, 0.0))
+
+
 def child_pairs(edited: pd.DataFrame) -> list[tuple[str, str]]:
     """아동 발화 중 목표어·산출형이 모두 있는 (목표어, 산출형) 쌍."""
     rows = edited[edited["화자"] == "아동"]
@@ -129,13 +149,27 @@ def child_targets(edited: pd.DataFrame) -> list[str]:
     return [str(t).strip() for t in rows["목표어"] if str(t).strip()]
 
 
+def _rows_from_edited(edited: pd.DataFrame, lookup: dict) -> list[dict]:
+    """편집된 표 → 표준 행 리스트(화자/목표어/산출형 + 시간 복원)."""
+    rows = []
+    for _, r in edited.iterrows():
+        start, end = _se_of(r.get("시간"), lookup)
+        rows.append({
+            "start": start, "end": end,
+            "화자": r.get("화자") or "아동",
+            "목표어": str(r.get("목표어") or "").strip(),
+            "산출형": str(r.get("산출형") or "").strip(),
+        })
+    return rows
+
+
 def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
     """음성 업로드 → Whisper 목표어 + 화자 지정 + 산출형 듀얼 검수 표.
 
     반환: 편집된 DataFrame(화자/목표어/산출형) 또는 None(아직 전사 전).
     """
-    seg_key, audio_key = f"{prefix}_segments", f"{prefix}_audio"
-    pmap_key, table_key = f"{prefix}_produced", f"{prefix}_table"
+    rows_key, audio_key = f"{prefix}_rows", f"{prefix}_audio"
+    ver_key, msg_key = f"{prefix}_ver", f"{prefix}_msg"
 
     uploaded = st.file_uploader(
         "음성 파일 (.mp3, .wav, .m4a)", type=["mp3", "wav", "m4a"], key=f"{prefix}_upl")
@@ -146,30 +180,38 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
                 with st.spinner("Whisper 전사 중…"):
                     segs = transcribe_target(
                         uploaded.name, uploaded.getvalue(), api_key=api_key)
-                st.session_state[seg_key] = segs
+                st.session_state[rows_key] = [
+                    {"start": s["start"], "end": s["end"], "화자": "아동",
+                     "목표어": s["text"], "산출형": ""}
+                    for s in segs
+                ]
                 st.session_state[audio_key] = (uploaded.name, uploaded.getvalue())
-                st.session_state[pmap_key] = {}
+                st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+                st.session_state.pop(msg_key, None)
                 st.success(f"{len(segs)}개 발화 전사 완료. 화자 지정 후 산출형을 입력/생성하세요.")
             except TranscriptionError as e:
                 st.error(str(e))
 
-    segs = st.session_state.get(seg_key)
-    if not segs:
+    rows = st.session_state.get(rows_key)
+    if not rows:
         st.info("음성을 업로드하고 목표어 전사를 시작하세요.")
         return None
 
-    pmap = st.session_state.get(pmap_key, {})
-    st.markdown("**듀얼 검수** — 화자(아동/치료사/제외) 지정 · 목표어/산출형 수정 · 행 추가/삭제로 분리·병합")
-    base_df = pd.DataFrame([
-        {"#": s["index"],
-         "시간": f"{format_ts(s['start'])}–{format_ts(s['end'])}",
-         "화자": "아동",
-         "목표어": s["text"],
-         "산출형": pmap.get(s["index"], "")}
-        for s in segs
+    for level, text in st.session_state.pop(msg_key, []):
+        getattr(st, level)(text)
+
+    st.markdown(
+        "**듀얼 검수** — 화자(아동/치료사/제외) 지정 · 목표어/산출형 수정 · "
+        "한 칸에 여러 문장이 붙어 있으면 마침표(.)를 넣고 **‘✂️ 발화 나누기’**로 행을 분리하세요.")
+
+    ver = st.session_state.get(ver_key, 0)
+    df = pd.DataFrame([
+        {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
+         "화자": r["화자"], "목표어": r["목표어"], "산출형": r["산출형"]}
+        for i, r in enumerate(rows)
     ])
     edited = st.data_editor(
-        base_df, key=table_key, use_container_width=True, hide_index=True,
+        df, key=f"{prefix}_table_{ver}", use_container_width=True, hide_index=True,
         num_rows="dynamic", disabled=["#", "시간"],
         column_config={
             "화자": st.column_config.SelectboxColumn(
@@ -179,29 +221,60 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
         },
     )
 
-    if st.button("🤖 GPT-4o로 산출형 자동 생성 (아동·빈칸만)", key=f"{prefix}_gen"):
+    lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
+    c_split, c_gen = st.columns(2)
+
+    if c_split.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_split",
+                      use_container_width=True):
+        new_rows = []
+        for r in _rows_from_edited(edited, lookup):
+            t_parts = split_sentences(r["목표어"])
+            p_parts = split_sentences(r["산출형"])
+            for k in range(max(len(t_parts), len(p_parts), 1)):
+                tgt = t_parts[k] if k < len(t_parts) else ""
+                prod = p_parts[k] if k < len(p_parts) else ""
+                if tgt or prod:
+                    new_rows.append({"start": r["start"], "end": r["end"],
+                                     "화자": r["화자"], "목표어": tgt, "산출형": prod})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+
+    if c_gen.button("🤖 GPT-4o로 산출형 자동 생성 (아동·빈칸만)", key=f"{prefix}_gen",
+                    use_container_width=True):
         fname, abytes = st.session_state[audio_key]
         few = load_few_shot()
-        new_map = dict(pmap)
-        seg_by_idx = {s["index"]: s for s in segs}
-        empty = edited[(edited["화자"] == "아동") & (edited["산출형"].fillna("") == "")]
-        done, failed = 0, 0
-        with st.spinner(f"산출형 생성 중… ({len(empty)}건)"):
-            for idx in empty["#"].tolist():
-                s = seg_by_idx[idx]
+        new_rows = _rows_from_edited(edited, lookup)
+        todo = [i for i, r in enumerate(new_rows)
+                if r["화자"] == "아동" and not r["산출형"] and r["end"] > r["start"]]
+        done, errors = 0, []
+        with st.spinner(f"산출형 생성 중… ({len(todo)}건)"):
+            for i in todo:
+                r = new_rows[i]
                 try:
-                    clip, _ = slice_audio(abytes, fname, s["start"], s["end"])
-                    new_map[idx] = transcribe_produced("seg.wav", clip, few, api_key=api_key)
+                    clip, _ = slice_audio(abytes, fname, r["start"], r["end"])
+                    new_rows[i]["산출형"] = transcribe_produced(
+                        "seg.wav", clip, few, api_key=api_key)
                     done += 1
-                except TranscriptionError:
-                    failed += 1
-        st.session_state[pmap_key] = new_map
+                except TranscriptionError as e:
+                    errors.append(str(e))
+        st.session_state[rows_key] = new_rows
+        st.session_state[ver_key] = ver + 1
+        msgs = []
         if done:
-            st.success(f"{done}건 생성 완료.")
-        if failed:
-            st.warning(f"{failed}건 실패 (wav 권장 · API 키/네트워크 확인).")
+            msgs.append(("success", f"{done}건 산출형 생성 완료."))
+        if errors:
+            msgs.append(("error", f"{len(errors)}건 실패 — {errors[0]}"))
+        if not todo:
+            msgs.append(("info",
+                         "자동 생성 대상이 없습니다. (화자=아동 · 산출형이 비어 있음 · "
+                         "시간 정보가 있는 행만 대상; 수동 추가 행은 제외)"))
+        st.session_state[msg_key] = msgs
         st.rerun()
-    st.caption("자동 생성은 빈 산출형(아동)만 채웁니다. 입력한 산출형은 보존됩니다.")
+
+    st.caption("‘발화 나누기’는 모든 행을 마침표/줄바꿈 기준으로 다시 나눕니다 (시간·화자 유지). "
+               "자동 생성은 빈 산출형(아동)만 채우며 입력한 산출형은 보존됩니다.")
     return edited
 
 
@@ -260,9 +333,12 @@ def language_to_excel(result: dict) -> bytes:
 def articulation_to_excel(result: dict) -> bytes:
     s = result["summary"]
     summary = pd.DataFrame({
-        "지표": ["PCC(%)", "목표 자음 수", "정확 자음 수", "오류 수", "첨가"],
+        "지표": ["PCC(%)", "목표 자음 수", "정확 자음 수", "오류 수", "첨가",
+               "PVC(%)", "목표 모음 수", "정확 모음 수", "모음 오류 수"],
         "값": [result["pcc"], s["total_consonants"], s["correct_consonants"],
-              s["error_count"], s["additions"]],
+              s["error_count"], s["additions"],
+              result.get("pvc", 0.0), s.get("total_vowels", 0),
+              s.get("correct_vowels", 0), s.get("vowel_error_count", 0)],
     })
     pe, pt = result["position_errors"], result["position_total"]
     pos = pd.DataFrame({
@@ -279,6 +355,12 @@ def articulation_to_excel(result: dict) -> bytes:
     errs = pd.DataFrame(result["errors"]).rename(columns={
         "target": "목표", "produced": "산출", "position": "위치", "word": "어절"}) \
         if result["errors"] else pd.DataFrame(columns=["목표", "산출", "위치", "어절"])
+    va = result.get("vowel_accuracy") or {}
+    vowel_acc = pd.DataFrame({"모음": list(va.keys()), "정확도(%)": list(va.values())})
+    vconf_rows = [{"목표": t, "산출": p, "빈도": c}
+                  for t, row in (result.get("vowel_confusion_matrix") or {}).items()
+                  for p, c in row.items()]
+    vconf = pd.DataFrame(vconf_rows) if vconf_rows else pd.DataFrame(columns=["목표", "산출", "빈도"])
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
         summary.to_excel(xw, sheet_name="요약", index=False)
@@ -286,6 +368,8 @@ def articulation_to_excel(result: dict) -> bytes:
         pa.to_excel(xw, sheet_name="음소정확도", index=False)
         conf.to_excel(xw, sheet_name="컨퓨전매트릭스", index=False)
         errs.to_excel(xw, sheet_name="오류상세", index=False)
+        vowel_acc.to_excel(xw, sheet_name="모음정확도", index=False)
+        vconf.to_excel(xw, sheet_name="모음컨퓨전", index=False)
     return buf.getvalue()
 
 
@@ -407,7 +491,13 @@ def render_articulation_results(result: dict) -> None:
     c2.metric("목표 자음 수", s["total_consonants"])
     c3.metric("오류 수", s["error_count"])
     c4.metric("첨가", s["additions"])
-    st.caption("PCC = 정확 자음 / 목표 자음 × 100. 목표어는 g2p 발음형으로 변환 후 비교 (초성 ㅇ 제외).")
+    v1, v2, v3, v4 = st.columns(4)
+    v1.metric("PVC (모음정확도)", f"{result.get('pvc', 0.0)}%")
+    v2.metric("목표 모음 수", s.get("total_vowels", 0))
+    v3.metric("모음 오류 수", s.get("vowel_error_count", 0))
+    v4.metric("정확 모음 수", s.get("correct_vowels", 0))
+    st.caption("PCC = 정확 자음 / 목표 자음 × 100 (초성 ㅇ 제외) · PVC = 정확 모음 / 목표 모음 × 100. "
+               "목표어는 g2p 발음형으로 변환 후 비교.")
 
     st.divider()
     st.subheader("컨퓨전 매트릭스 (목표 → 산출)")
@@ -452,9 +542,44 @@ def render_articulation_results(result: dict) -> None:
         afig.update_layout(xaxis_title="", coloraxis_showscale=False, height=340)
         st.plotly_chart(afig, use_container_width=True)
 
+    va = result.get("vowel_accuracy") or {}
+    vcm = result.get("vowel_confusion_matrix") or {}
+    if va or vcm:
+        st.divider()
+        st.subheader("모음 (중성) 분석")
+        st.caption("자음 PCC와 분리한 모음 정확도. 모음 대치·생략 경향 확인용 (임상가 검수).")
+        if va:
+            va_df = pd.DataFrame({"모음": list(va.keys()), "정확도(%)": list(va.values())})
+            vfig = px.bar(va_df, x="모음", y="정확도(%)", text="정확도(%)",
+                          color="정확도(%)", color_continuous_scale="RdYlGn", range_y=[0, 100])
+            vfig.update_layout(xaxis_title="", coloraxis_showscale=False, height=320)
+            st.plotly_chart(vfig, use_container_width=True)
+        if vcm:
+            v_targets = sorted(vcm.keys())
+            v_prod = sorted({p for row in vcm.values() for p in row})
+            vz = [[vcm[t].get(p, 0) for p in v_prod] for t in v_targets]
+            vcfig = px.imshow(vz, x=v_prod, y=v_targets, text_auto=True, aspect="auto",
+                              color_continuous_scale="Purples",
+                              labels=dict(x="산출 모음", y="목표 모음", color="빈도"))
+            vcfig.update_layout(height=max(280, 40 * len(v_targets)))
+            st.plotly_chart(vcfig, use_container_width=True)
+            st.caption("∅ = 생략(대응 산출 모음 없음)")
+
     if result["errors"]:
-        with st.expander(f"오류 상세 ({len(result['errors'])}건)"):
+        with st.expander(f"자음 오류 상세 ({len(result['errors'])}건)"):
             st.dataframe(
                 pd.DataFrame(result["errors"]).rename(columns={
                     "target": "목표", "produced": "산출", "position": "위치", "word": "어절"}),
+                use_container_width=True, hide_index=True)
+    if result.get("vowel_errors"):
+        with st.expander(f"모음 오류 상세 ({len(result['vowel_errors'])}건)"):
+            st.dataframe(
+                pd.DataFrame(result["vowel_errors"]).rename(columns={
+                    "target": "목표", "produced": "산출", "word": "어절"}),
+                use_container_width=True, hide_index=True)
+    if result.get("additions_detail"):
+        with st.expander(f"첨가 상세 ({len(result['additions_detail'])}건)"):
+            st.dataframe(
+                pd.DataFrame(result["additions_detail"]).rename(columns={
+                    "produced": "산출(첨가)", "position": "위치", "word": "어절"}),
                 use_container_width=True, hide_index=True)
