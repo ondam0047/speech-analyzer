@@ -1,10 +1,10 @@
 """g2p 래퍼 — 목표어(표준 철자) → 발음형 변환.
 
-g2pkk(메캡 불필요) 우선, 없으면 g2pk 사용.
-
-g2pkk는 init 시 nltk `cmudict` 데이터를 런타임 다운로드한다. 배포 환경에서
-네트워크가 제한되면 다운로드가 실패해 변환이 원문 그대로 반환되므로(자연
-음운변동이 오류로 오인됨), 레포에 동봉한 nltk_data를 우선 경로로 등록한다.
+g2pkk 사용. g2pkk는 내부적으로 MeCab(python-mecab-ko)과 nltk cmudict를 쓴다.
+- MeCab이 없으면 g2pkk가 조용히 mecab=None으로 두어 변환이 원문 그대로
+  떨어진다 → requirements에 python-mecab-ko(+dic)를 명시해 빌드 때 설치.
+- cmudict는 런타임 다운로드를 시도하므로, 레포에 동봉한 nltk_data를 우선
+  경로로 등록해 네트워크 없이도 동작하게 한다.
 """
 
 from __future__ import annotations

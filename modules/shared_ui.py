@@ -34,16 +34,29 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21c · g2p cmudict 번들 + 표 입력유실/미리보기 수정"
+BUILD_TAG = "2026-05-21d · mecab 의존성 추가(g2p 핵심 수정) + 입력유실 되돌림"
 
 
 def g2p_self_test() -> tuple[bool, str]:
-    """g2p가 배포 환경에서 실제로 동작하는지 확인(국물→궁물)."""
+    """g2p가 배포 환경에서 실제로 동작하는지 확인(국물→궁물).
+
+    실패 시 실제 예외/원인을 반환한다(g2pkk는 mecab 미설치 시 조용히 None을
+    반환해 변환이 원문으로 떨어진다 → mecab 설치 여부를 함께 점검).
+    """
+    mecab_ok = False
     try:
-        out = get_g2p().to_pronunciation("국물")
-        return (out == "궁물"), out
-    except Exception as e:  # pragma: no cover
-        return False, f"로드 오류: {e}"
+        import mecab
+        mecab.MeCab()
+        mecab_ok = True
+    except Exception as e:
+        return False, f"mecab 미작동: {type(e).__name__}: {e}"
+    try:
+        out = get_g2p()._g2p("국물")  # 원시 호출로 실제 예외를 표면화
+        if out == "궁물":
+            return True, f"국물→{out} (mecab OK)"
+        return False, f"국물→{out} (mecab={mecab_ok}, 변환 비정상)"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e} (mecab={mecab_ok})"
 
 
 @st.cache_resource(show_spinner="형태소 분석기 로딩 중…")
@@ -254,7 +267,6 @@ def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
             "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
         },
     )
-    st.session_state[disp_key] = edited  # 편집 즉시 보존(입력 유실 방지)
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
     if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_tsplit"):
         new_rows = []
@@ -348,7 +360,6 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
             "산출형": st.column_config.TextColumn("산출형 (실제 발음)", width="medium"),
         },
     )
-    st.session_state[disp_key] = edited  # 편집 즉시 보존(입력 유실 방지)
 
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
     c_split, c_gen = st.columns(2)
@@ -531,8 +542,6 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             "산출형": st.column_config.TextColumn("산출형 (들리는 실제 발음)", width="medium"),
         },
     )
-    # 편집 결과를 즉시 세션에 보존 → 다른 리런에도 입력이 유지됨(입력 유실 방지)
-    st.session_state[disp_key] = edited
 
     if st.button("✂️ 발화 나누기 (목표어 기준 · 산출형 동반)", key=f"{prefix}_msplit"):
         new_rows = []
