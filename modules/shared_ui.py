@@ -1,4 +1,4 @@
-"""모드 간 공유 UI 컴포넌트 (언어/조음/통합 페이지 공통)."""
+"""모드 간 공유 UI 컴포넌트 (언어·조음 페이지 공통)."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21e · 순수 파이썬 g2p(네이티브 의존성 제거)"
+BUILD_TAG = "2026-05-21f · 조음 산출형 자동채움 + 통합분석 제거"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -133,7 +133,7 @@ def api_key_input() -> str:
     return get_openai_key()
 
 
-# ---------- 음성 듀얼 검수 (목표어/산출형) : 조음·통합 공용 ----------
+# ---------- 음성 듀얼 검수 (목표어/산출형) : 조음 공용 ----------
 
 _SENT_BOUNDARY = re.compile(r"[.!?。！？]+\s*|\n+")
 
@@ -457,7 +457,7 @@ def _read_manual_table(file) -> list[dict]:
 
 
 def manual_dual_entry(prefix: str) -> pd.DataFrame:
-    """음성 없이 목표어/산출형을 직접 입력하는 검수 표(조음·통합).
+    """음성 없이 목표어/산출형을 직접 입력하는 검수 표(조음).
 
     임상가가 귀로 들은 산출형을 직접 전사한다. 목표어(표준 철자)에는 g2p가
     자연스러운 음운변동(연음·경음화·비음화 등)을 자동 적용하므로, 자연 변동은
@@ -541,21 +541,24 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             st.session_state[ver_key] = ver + 1
             st.rerun()
 
-    # 미리보기는 버튼으로만 계산(타이핑/엔터 리런과 분리 → 입력 중 g2p 호출 없음)
-    prev_key = f"{prefix}_mprevdata"
-    if st.button("🔎 목표 발음형 확인 (자연스러운 음운변동 자동 적용)", key=f"{prefix}_mprev"):
+    # 산출형을 목표 발음형(자연 음운변동 적용)으로 미리 채우고, 임상가가 오류만 수정
+    if st.button("📝 산출형 = 목표 발음형으로 채우기 (빈칸만 · 여기서 수정 시작)",
+                 key=f"{prefix}_mfill"):
         g2p = get_g2p()
-        st.session_state[prev_key] = [
-            {"목표어": str(r["목표어"]).strip(),
-             "목표 발음형(비교 기준)": g2p.to_pronunciation_words(str(r["목표어"]).strip())}
-            for _, r in edited.iterrows() if str(r.get("목표어") or "").strip()
-        ]
-    if st.session_state.get(prev_key):
-        st.dataframe(pd.DataFrame(st.session_state[prev_key]),
-                     use_container_width=True, hide_index=True)
-        st.caption("연음(초성우선원리)·평파열음화·경음화·비음화·유음화·격음화·구개음화 등 "
-                   "의무적 음운변동이 목표어에 자동 적용된 발음형입니다. 산출형을 이 발음형과 "
-                   "비교하므로, 자연스러운 변동은 오류로 잡히지 않습니다. (목표어 수정 후 다시 누르세요)")
+        new_rows = []
+        for _, r in edited.iterrows():
+            tgt = str(r.get("목표어") or "").strip()
+            prod = str(r.get("산출형") or "").strip()
+            if tgt and not prod:
+                prod = g2p.to_pronunciation_words(tgt)
+            if tgt or prod:
+                new_rows.append({"목표어": tgt, "산출형": prod})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+    st.caption("‘산출형 = 목표 발음형으로 채우기’를 누르면 표준 발음형(연음·경음화 등 자연 변동 적용)이 "
+               "산출형에 채워집니다. 아동이 다르게 낸 음소만 고치면 됩니다(전부 입력할 필요 없음).")
 
     out = edited.copy()
     out["화자"] = "아동"

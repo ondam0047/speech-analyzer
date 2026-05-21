@@ -43,7 +43,7 @@ with st.container(border=True):
 
 st.markdown("### 2단계 · 분석")
 
-col1, col2, col3 = st.columns(3, gap="large")
+col1, col2 = st.columns(2, gap="large")
 
 with col1:
     with st.container(border=True):
@@ -61,14 +61,6 @@ with col2:
         st.write("입력: 직접 입력(목표어/산출형) · 음성")
         st.page_link("pages/2_🔊_조음_분석.py", label="시작하기 →", use_container_width=True)
 
-with col3:
-    with st.container(border=True):
-        st.subheader("🎯 통합 분석")
-        st.write("**언어 + 조음**")
-        st.write("종합 보고서")
-        st.write("입력: 직접 입력 · 음성")
-        st.page_link("pages/3_🎯_통합_분석.py", label="시작하기 →", use_container_width=True)
-
 st.divider()
 
 with st.expander("ℹ️ 사용 순서 안내"):
@@ -78,10 +70,10 @@ with st.expander("ℹ️ 사용 순서 안내"):
            (마침표/엔터로 발화 나누기) → **분석에 사용**(세션) 또는 **엑셀 저장**.
         2. **📝 언어 분석** — 전사 결과 불러오기 / 텍스트 입력 / 음성 업로드 후 분석.
            MLU-w·MLU-m·TTR·NDW·TNW, 의미영역, 조사·어미(연결어미) 빈도, 문장유형.
-        3. **🔊 조음 분석** — 전사에서 목표어 불러오기(또는 직접 입력) → 임상가가 **산출형(실제 발음)**
-           전사 → PCC·PVC, 오류 음운변동(상대분석), 위치별 오류. 자연스러운 음운변동은 오류로 잡히지 않음.
-        4. **🎯 통합 분석** — 언어 + 조음 동시 + 종합 코멘트.
-        5. 각 분석 후 **📄 HTML 보고서**로 저장(브라우저 인쇄 → PDF 가능).
+        3. **🔊 조음 분석** — 전사에서 목표어 불러오기(또는 직접 입력) → **산출형을 목표 발음형으로 채운 뒤**
+           아동이 다르게 낸 음소만 수정 → PCC·PVC, 오류 음운변동(상대분석), 위치별 오류.
+           자연스러운 음운변동은 오류로 잡히지 않음.
+        4. 각 분석 후 **📄 HTML 보고서**로 저장(브라우저 인쇄 → PDF 가능).
 
         > 환자 음성은 업로드 시 서버·OpenAI로 전송됩니다. 보호자 동의·기관 정책을 확인하세요.
         """
