@@ -11,8 +11,13 @@ import os
 from modules.transcription import TranscriptionError, _get_client
 
 APAC_TAXONOMY = (
-    "발달적 음운변동: 전방화, 연구개음의 전설음화, 이완음화, 기식음화, 구개음화, 비음화, 유음화\n"
-    "비전형적 음운변동: 어두초성 생략, 종성 생략, 비전형적 어중 단순화"
+    "조음방법 변동: 파열음화, 마찰음화, 파찰음화, 비음화, 탈비음화, 유음화, 유음의 단순화\n"
+    "조음위치 변동: 전방화(연구개음의 전방화 포함), 후방화, 성문음화\n"
+    "발성유형 변동: 긴장음화, 기식음화, 이완음화\n"
+    "음절구조 변동: 어두초성생략, 어중초성생략, 어말종성생략, 어중종성생략, 음절생략, 첨가, 도치\n"
+    "발달적: 파열음화·마찰음화·연구개음의 전방화·긴장음화·유음의 단순화·종성생략 등\n"
+    "비전형(비발달적): 어두초성생략·후방화·첨가·도치·탈비음화·성문음화·음절생략 등\n"
+    "(경음화·비음화·유음화 등 의무적 음운변동은 정상 산출이므로 오류로 보지 않음)"
 )
 
 
@@ -48,6 +53,16 @@ def summarize_articulation(articulation: dict) -> str:
     if vpairs:
         lines.append("주요 모음 오류 패턴(목표→산출, 빈도순): "
                      + ", ".join(f"{p} ({c})" for c, p in vpairs[:8]))
+    pp = articulation.get("phonological_processes") or []
+    if pp:
+        dev = [f"{x['process']}({x['count']})" for x in pp if x["type"] == "발달적"]
+        atyp = [f"{x['process']}({x['count']})" for x in pp if x["type"] == "비전형"]
+        lines.append("오류 음운변동(자동분류, 의무적 변동 제외): "
+                     + ", ".join(f"{x['process']}({x['count']})" for x in pp[:14]))
+        if atyp:
+            lines.append("그중 비전형(비발달적) 패턴: " + ", ".join(atyp))
+    if s.get("syllable_omissions"):
+        lines.append(f"음절 생략(추정): {s['syllable_omissions']}회")
     return "\n".join(lines)
 
 

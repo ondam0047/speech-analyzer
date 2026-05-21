@@ -5,9 +5,13 @@
   1. 목표어 → 발음형(g2p)
   2. 어절 정렬 → 어절 내 음소(자모) 정렬(Needleman-Wunsch)
   3. 자음(초성·종성, 초성 ㅇ 제외) 기준으로 컨퓨전 매트릭스 / PCC / 위치별 오류 산출
-  4. 모음(중성)은 PCC와 분리해 PVC(모음정확도)로 별도 집계
+  4. 모음(중성)은 PCC와 분리해 PVC(모음정확도)로 별도 집계(음절핵이라 생략 불가)
+  5. 오류(대치/생략/첨가)를 한국어 음운변동(상대분석)으로 분류
 산출: confusion_matrix, position_errors, pcc, phoneme_accuracy, errors,
-      pvc, vowel_accuracy, vowel_confusion_matrix, vowel_errors, additions_detail
+      pvc, vowel_accuracy, vowel_confusion_matrix, vowel_errors, additions_detail,
+      phonological_processes
+
+* 의무적(자연스러운) 음운변동은 목표어 g2p 발음형에 이미 반영 → 오류로 잡히지 않음.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from collections import Counter, defaultdict
 
 from modules.g2p import G2PConverter
 from modules.jamo_split import word_phonemes
+from modules.phonology import classify_omission, classify_substitution, is_atypical
 
 OMISSION = "∅"  # 생략(대응 산출 음소 없음)
 
@@ -73,6 +78,15 @@ def _position(ph: dict) -> str:
     return "중성"
 
 
+def _fine_position(ph: dict, last_syl: int) -> str:
+    """음운변동 분류용 세부 위치(종성을 어말/어중으로 구분)."""
+    if ph["kind"] == "초성":
+        return "어두초성" if ph["syllable"] == 0 else "어중초성"
+    if ph["kind"] == "종성":
+        return "어말종성" if ph["syllable"] == last_syl else "어중종성"
+    return "중성"
+
+
 POSITION_ORDER = ["어두초성", "어중초성", "종성"]
 
 
@@ -84,13 +98,16 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
     phoneme_total: Counter = Counter()
     phoneme_correct: Counter = Counter()
     errors: list[dict] = []
-    # 모음(중성) — 자음 PCC와 별도 집계(PVC)
+    # 모음(중성) — 자음 PCC와 별도 집계(PVC). 음절핵이라 생략되지 않음.
     vowel_confusion: dict[str, Counter] = defaultdict(Counter)
     vowel_total: Counter = Counter()
     vowel_correct: Counter = Counter()
     vowel_errors: list[dict] = []
     additions = 0
     additions_detail: list[dict] = []
+    # 오류 음운변동(상대분석) 집계
+    process_counter: Counter = Counter()
+    syllable_omissions = 0
 
     for target_text, produced_text in pairs:
         tw = (target_text or "").split()
@@ -103,6 +120,7 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
                 for pph in word_phonemes(p_word or ""):
                     if _is_consonant(pph):
                         additions += 1
+                        process_counter["첨가"] += 1
                         additions_detail.append({
                             "produced": pph["jamo"], "position": _position(pph),
                             "word": p_word,
@@ -110,6 +128,7 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
                 continue
             t_phs = word_phonemes(g2p.to_pronunciation(t_word))
             p_phs = word_phonemes(p_word or "")
+            last_syl = max((x["syllable"] for x in t_phs), default=0)
             ops = _nw_align(
                 [x["jamo"] for x in t_phs], [x["jamo"] for x in p_phs],
                 lambda x, y: 1.0 if x == y else -1.0,
@@ -120,6 +139,7 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
                 if tph is None:
                     if pph is not None and _is_consonant(pph):
                         additions += 1
+                        process_counter["첨가"] += 1
                         additions_detail.append({
                             "produced": pph["jamo"], "position": _position(pph),
                             "word": p_word,
@@ -133,23 +153,43 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
                     if pph is not None and pph["jamo"] == target_j:
                         phoneme_correct[target_j] += 1
                     else:
-                        produced_j = pph["jamo"] if pph is not None else OMISSION
+                        # 산출이 없거나 무음 초성(ㅇ)이면 자음 생략으로 처리
+                        null_onset = (pph is not None and pph["kind"] == "초성"
+                                      and pph["jamo"] == "ㅇ")
+                        if pph is None or null_onset:
+                            produced_j = OMISSION
+                            procs = [classify_omission(_fine_position(tph, last_syl))]
+                        elif _is_consonant(pph):
+                            produced_j = pph["jamo"]
+                            procs = classify_substitution(target_j, produced_j)
+                        else:
+                            produced_j = pph["jamo"]
+                            procs = ["대치"]  # 자음→모음(정렬 잡음)
                         confusion[target_j][produced_j] += 1
                         position_errors[pos] += 1
+                        for pr in procs:
+                            process_counter[pr] += 1
                         errors.append({
                             "target": target_j, "produced": produced_j,
                             "position": pos, "word": t_word,
+                            "process": ", ".join(procs),
                         })
-                elif tph["kind"] == "중성":  # 모음
-                    vowel_total[target_j] += 1
-                    if pph is not None and pph["jamo"] == target_j:
-                        vowel_correct[target_j] += 1
-                    else:
-                        produced_j = pph["jamo"] if pph is not None else OMISSION
-                        vowel_confusion[target_j][produced_j] += 1
-                        vowel_errors.append({
-                            "target": target_j, "produced": produced_j, "word": t_word,
-                        })
+                elif tph["kind"] == "중성":  # 모음: 대치만 집계(생략은 음절생략으로)
+                    if pph is not None and pph["kind"] == "중성":
+                        vowel_total[target_j] += 1
+                        if pph["jamo"] == target_j:
+                            vowel_correct[target_j] += 1
+                        else:
+                            vowel_confusion[target_j][pph["jamo"]] += 1
+                            process_counter["모음대치"] += 1
+                            vowel_errors.append({
+                                "target": target_j, "produced": pph["jamo"],
+                                "word": t_word,
+                            })
+                    elif pph is None:
+                        # 음절핵 미산출 = 음절 생략(추정)
+                        syllable_omissions += 1
+                        process_counter["음절생략"] += 1
 
     total = sum(phoneme_total.values())
     correct = sum(phoneme_correct.values())
@@ -165,6 +205,10 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
         ph: round(vowel_correct[ph] / vowel_total[ph] * 100, 1)
         for ph in sorted(vowel_total, key=lambda p: -vowel_total[p])
     }
+    phonological_processes = [
+        {"process": p, "count": c, "type": "비전형" if is_atypical(p) else "발달적"}
+        for p, c in process_counter.most_common()
+    ]
 
     return {
         "confusion_matrix": {t: dict(c) for t, c in confusion.items()},
@@ -178,6 +222,7 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
         "vowel_confusion_matrix": {t: dict(c) for t, c in vowel_confusion.items()},
         "vowel_errors": vowel_errors,
         "additions_detail": additions_detail,
+        "phonological_processes": phonological_processes,
         "summary": {
             "total_consonants": total,
             "correct_consonants": correct,
@@ -186,5 +231,6 @@ def analyze_articulation(pairs: list[tuple[str, str]]) -> dict:
             "total_vowels": vtotal,
             "correct_vowels": vcorrect,
             "vowel_error_count": len(vowel_errors),
+            "syllable_omissions": syllable_omissions,
         },
     }

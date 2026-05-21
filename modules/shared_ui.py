@@ -363,8 +363,13 @@ def articulation_to_excel(result: dict) -> bytes:
                  for t, row in result["confusion_matrix"].items() for p, c in row.items()]
     conf = pd.DataFrame(conf_rows) if conf_rows else pd.DataFrame(columns=["목표", "산출", "빈도"])
     errs = pd.DataFrame(result["errors"]).rename(columns={
-        "target": "목표", "produced": "산출", "position": "위치", "word": "어절"}) \
-        if result["errors"] else pd.DataFrame(columns=["목표", "산출", "위치", "어절"])
+        "target": "목표", "produced": "산출", "position": "위치",
+        "word": "어절", "process": "음운변동"}) \
+        if result["errors"] else pd.DataFrame(columns=["목표", "산출", "위치", "어절", "음운변동"])
+    pp = result.get("phonological_processes") or []
+    proc = pd.DataFrame(
+        [{"음운변동": x["process"], "유형": x["type"], "빈도": x["count"]} for x in pp]) \
+        if pp else pd.DataFrame(columns=["음운변동", "유형", "빈도"])
     va = result.get("vowel_accuracy") or {}
     vowel_acc = pd.DataFrame({"모음": list(va.keys()), "정확도(%)": list(va.values())})
     vconf_rows = [{"목표": t, "산출": p, "빈도": c}
@@ -377,6 +382,7 @@ def articulation_to_excel(result: dict) -> bytes:
         pos.to_excel(xw, sheet_name="위치별오류", index=False)
         pa.to_excel(xw, sheet_name="음소정확도", index=False)
         conf.to_excel(xw, sheet_name="컨퓨전매트릭스", index=False)
+        proc.to_excel(xw, sheet_name="음운변동", index=False)
         errs.to_excel(xw, sheet_name="오류상세", index=False)
         vowel_acc.to_excel(xw, sheet_name="모음정확도", index=False)
         vconf.to_excel(xw, sheet_name="모음컨퓨전", index=False)
@@ -574,6 +580,30 @@ def render_articulation_results(result: dict) -> None:
         afig.update_layout(xaxis_title="", coloraxis_showscale=False, height=340)
         st.plotly_chart(afig, use_container_width=True)
 
+    pp = result.get("phonological_processes") or []
+    st.divider()
+    st.subheader("오류 음운변동 패턴 (상대분석)")
+    st.caption(
+        "목표 발음형 대비 산출형의 차이를 한국어 음운변동으로 분류한 결과입니다. "
+        "경음화·비음화·유음화 등 의무적(자연스러운) 변동은 목표 발음형에 이미 반영되어 "
+        "오류로 잡히지 않습니다. ‘비전형’은 정상발달에서 드물어 장애를 시사할 수 있습니다 (임상가 검수).")
+    if pp:
+        pp_df = pd.DataFrame(
+            [{"음운변동": x["process"], "유형": x["type"], "빈도": x["count"]} for x in pp])
+        ppfig = px.bar(pp_df, x="음운변동", y="빈도", color="유형", text="빈도",
+                       color_discrete_map={"발달적": "#4C78A8", "비전형": "#E45756"})
+        ppfig.update_layout(xaxis_title="", legend_title="", height=360)
+        st.plotly_chart(ppfig, use_container_width=True)
+        st.dataframe(pp_df, use_container_width=True, hide_index=True)
+        atyp = [x["process"] for x in pp if x["type"] == "비전형"]
+        if atyp:
+            st.warning("⚠️ 비전형(비발달적) 패턴: " + ", ".join(atyp) + " — 임상가 검수 권장.")
+        if result["summary"].get("syllable_omissions"):
+            st.caption(f"음절 생략(추정) {result['summary']['syllable_omissions']}회 — "
+                       "모음은 음절핵이라 생략 불가하므로 음절 단위 생략으로 해석합니다.")
+    else:
+        st.success("분류된 오류 음운변동이 없습니다.")
+
     va = result.get("vowel_accuracy") or {}
     vcm = result.get("vowel_confusion_matrix") or {}
     if va or vcm:
@@ -601,7 +631,8 @@ def render_articulation_results(result: dict) -> None:
         with st.expander(f"자음 오류 상세 ({len(result['errors'])}건)"):
             st.dataframe(
                 pd.DataFrame(result["errors"]).rename(columns={
-                    "target": "목표", "produced": "산출", "position": "위치", "word": "어절"}),
+                    "target": "목표", "produced": "산출", "position": "위치",
+                    "word": "어절", "process": "음운변동"}),
                 use_container_width=True, hide_index=True)
     if result.get("vowel_errors"):
         with st.expander(f"모음 오류 상세 ({len(result['vowel_errors'])}건)"):
