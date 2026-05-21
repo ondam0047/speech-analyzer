@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21n · 언어 LLM 코멘트(연령비교)+명료도, 홈 카드 클릭, 보고서에 코멘트 포함"
+BUILD_TAG = "2026-05-21o · 말명료도를 조음 분석으로 이동(목표어 기준), 언어에서 제거"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -647,7 +647,8 @@ def report_download_button(language: dict | None = None,
     """분석 결과 → HTML 보고서 다운로드 버튼(브라우저 인쇄로 PDF 가능)."""
     from modules.report import build_report_html
     patient = st.session_state.get("patient_info") or {}
-    intelligibility = st.session_state.get("intelligibility")
+    # 말명료도는 조음 지표 — 조음 보고서에만 포함
+    intelligibility = st.session_state.get("intelligibility") if articulation is not None else None
     # 생성된 LLM 임상 코멘트를 보고서에 함께 포함(조음=artic_insight, 언어=lang_insight)
     if articulation is not None:
         insight = st.session_state.get("artic_insight")

@@ -11,7 +11,6 @@ import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.insights import generate_insight, summarize_language  # noqa: E402
-from modules.intelligibility import compute_intelligibility  # noqa: E402
 from modules.norms import LANGUAGE_REFERENCES, language_reference_text  # noqa: E402
 from modules.shared_ui import (  # noqa: E402
     SHARED_TRANSCRIPT,
@@ -100,24 +99,11 @@ else:  # 음성 업로드 (언어 분석은 목표어만 필요)
 
 if utterances:
     st.session_state["lang_result"] = get_analyzer().analyze(utterances)
-    st.session_state["intelligibility"] = compute_intelligibility(utterances)
     st.session_state.pop("lang_insight", None)
 
 result = st.session_state.get("lang_result")
 if result:
     render_language_results(result)
-
-    st.divider()
-    st.subheader("🗣️ 말명료도 (이해가능도)")
-    intel = st.session_state.get("intelligibility") or compute_intelligibility(
-        [u["text"] for u in result["utterances"]])
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("어절 명료도", f"{intel['word_intelligibility']}%")
-    m2.metric("음절 명료도", f"{intel['syllable_intelligibility']}%")
-    m3.metric("이해 어절 / 전체", f"{intel['intelligible_words']} / {intel['total_words']}")
-    m4.metric("불명료 어절", intel["unintelligible_words"])
-    st.caption("못 알아들은 부분을 음절 수만큼 ‘*’로 표기하면 명료도가 계산됩니다(예: 3음절 → ***). "
-               "어절 명료도 = ‘*’ 없는 어절 / 전체 어절 × 100. 전사 페이지에서도 확인할 수 있습니다.")
 
     st.divider()
     report_download_button(language=result, key="lang")

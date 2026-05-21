@@ -8,10 +8,12 @@ import streamlit as st
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.articulation import analyze_articulation  # noqa: E402
 from modules.insights import generate_insight, summarize_articulation  # noqa: E402
+from modules.intelligibility import compute_intelligibility  # noqa: E402
 from modules.norms import REFERENCES, reference_text  # noqa: E402
 from modules.shared_ui import (  # noqa: E402
     api_key_input,
     child_pairs,
+    child_targets,
     manual_dual_entry,
     render_articulation_results,
     report_download_button,
@@ -40,12 +42,30 @@ if edited is not None and st.button("📊 분석 실행", type="primary"):
         st.warning("목표어·산출형이 모두 입력된 아동 발화가 없습니다.")
     else:
         st.session_state["artic_result"] = analyze_articulation(pairs)
+        # 말명료도: 목표어 기준(목표어를 알아들었는지 = '*' 여부). 산출 오류가 있어도
+        # 목표어를 알아들었으면 명료한 것이므로 목표어 열로 계산한다.
+        st.session_state["intelligibility"] = compute_intelligibility(child_targets(edited))
         st.session_state.pop("artic_insight", None)
 
 result = st.session_state.get("artic_result")
 if result:
     st.divider()
     render_articulation_results(result)
+
+    intel = st.session_state.get("intelligibility")
+    if intel and intel.get("total_words"):
+        st.divider()
+        st.subheader("🗣️ 말명료도 (이해가능도)")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("어절 명료도", f"{intel['word_intelligibility']}%")
+        m2.metric("음절 명료도", f"{intel['syllable_intelligibility']}%")
+        m3.metric("이해 어절 / 전체", f"{intel['intelligible_words']} / {intel['total_words']}")
+        m4.metric("불명료 어절", intel["unintelligible_words"])
+        st.caption("못 알아들은 목표어는 음절 수만큼 ‘*’로 표기하세요(예: 3음절 → ***). "
+                   "어절 명료도 = ‘*’ 없는 어절 / 전체 어절 × 100. "
+                   "산출에 오류가 있어도 목표어를 알아들었으면 명료한 것으로 봅니다(명료도 ≠ 정확도).")
+
+    st.divider()
     report_download_button(articulation=result, key="artic")
 
     st.divider()
