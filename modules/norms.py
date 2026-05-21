@@ -147,3 +147,102 @@ REFERENCES = [
     "U-TAP2 (2020) 표준화 연구: 만 2;6~7세 자음정확도 발달.",
     "김수진·신지영 (2020). 말소리장애(2판). 시그마프레스.",
 ]
+
+
+# ---------- 언어(표현언어) 발달 규준 ----------
+# MLU(평균발화길이) 참고 범위는 근사치이며, 표본 크기·전사 기준·분석 단위 정의에 따라
+# 달라진다(이 도구의 낱말 정의는 체언+용언(기본형)+수식언+독립언). 절대 판정은 표준화
+# 검사로 해야 하며, 아래는 '대략 이 범위면 연령 기대 수준'을 보기 위한 참고용이다.
+
+def _mlu_m_range(age_years: float) -> tuple[float, float]:
+    """연령별 MLU-m(형태소) 참고 범위(근사)."""
+    if age_years < 2:
+        return (1.5, 2.0)
+    if age_years < 3:
+        return (2.0, 3.0)
+    if age_years < 4:
+        return (3.0, 4.0)
+    if age_years < 5:
+        return (4.0, 5.0)
+    if age_years < 6:
+        return (4.5, 6.0)
+    return (5.0, 7.0)
+
+
+def _mlu_w_range(age_years: float) -> tuple[float, float]:
+    """연령별 MLU-w(낱말) 참고 범위(근사)."""
+    if age_years < 2:
+        return (1.2, 1.6)
+    if age_years < 3:
+        return (1.5, 2.3)
+    if age_years < 4:
+        return (2.2, 3.0)
+    if age_years < 5:
+        return (2.8, 3.6)
+    if age_years < 6:
+        return (3.2, 4.2)
+    return (3.5, 4.8)
+
+
+def _grammar_note(age_years: float) -> str:
+    if age_years < 3:
+        return ("조사·어미가 출현하기 시작하고 두세 낱말 조합이 늘어나는 시기. "
+                "단문 위주이며 문법형태소는 제한적.")
+    if age_years < 4:
+        return ("다양한 조사·연결어미 사용이 증가하고 이어진문장이 출현. "
+                "기본 문법형태소가 자리잡는 시기.")
+    if age_years < 6:
+        return ("복문(이어진·안긴문장)이 확대되고 문법형태소가 안정. "
+                "전성어미·다양한 연결어미 사용 증가.")
+    return "구문 복잡성과 이야기(담화) 구성 능력이 발달하는 학령기 단계."
+
+
+def language_reference(age_months: int | None) -> dict | None:
+    """생활연령(개월) → 표현언어 발달 규준(MLU 참고 범위 등). 연령 미상이면 None."""
+    if not age_months or age_months <= 0:
+        return None
+    age_years = age_months / 12.0
+    return {
+        "age_months": age_months,
+        "age_years": round(age_years, 1),
+        "mlu_m_range": _mlu_m_range(age_years),
+        "mlu_w_range": _mlu_w_range(age_years),
+        "grammar_note": _grammar_note(age_years),
+    }
+
+
+def language_reference_text(age_months: int | None) -> str:
+    """LLM 프롬프트용 언어 발달 규준 텍스트."""
+    base = (
+        "[표현언어 발달 — 일반 경향]\n"
+        "  · MLU(평균발화길이)는 연령과 강한 상관(연령↑ → MLU↑). "
+        "MLU-m(형태소)이 MLU-w(낱말)보다 큼(한국어는 어절당 문법형태소가 많음).\n"
+        "  · 조사·어미는 만 2세경 출현, 연결어미는 3세경, 복문은 4~5세에 확대.\n"
+        "  · TTR(어휘다양도)은 표본 크기에 민감해 연령 절대비교에 부적합."
+    )
+    ref = language_reference(age_months)
+    if ref is None:
+        return (base + "\n[생활연령] 미입력 — 연령 대비 비교 제한적.")
+    y, m = divmod(ref["age_months"], 12)
+    lo_m, hi_m = ref["mlu_m_range"]
+    lo_w, hi_w = ref["mlu_w_range"]
+    return (
+        f"{base}\n\n"
+        f"[이 대상자: 생활연령 {y}세 {m}개월 ({ref['age_months']}개월) 참고 범위(근사)]\n"
+        f"  · MLU-m(형태소) 참고 범위: {lo_m}~{hi_m}\n"
+        f"  · MLU-w(낱말) 참고 범위: {lo_w}~{hi_w}\n"
+        f"  · 문법/구문 기대: {ref['grammar_note']}\n"
+        "→ 대상자 수치가 이 범위보다 뚜렷이 낮으면 연령 대비 지연 가능성을 검토하세요. "
+        "단, MLU 참고 범위는 근사치이므로 최종 판정은 표준화 검사로 확인해야 합니다."
+    )
+
+
+LANGUAGE_REFERENCES = [
+    "배소영·이승환 (1996). 한국 아동의 언어발달 연구: 평균발화길이를 중심으로.",
+    "김영태 (2014). 아동언어장애의 진단 및 치료(2판). 학지사.",
+    "이윤경 외 (2010). 아동 언어장애의 진단 및 중재.",
+    "권유진·배소영 (2006). 이야기 다시말하기를 통한 학령기 아동의 이야기 능력.",
+    "Lee, Y., & Lim, S. (2025). 2-5세 아동 MLU·LLU의 발달 양상과 판별력. CSD.",
+    "Rondal et al.; Korean MLU 연구 — MLU는 표본·전사 기준에 따라 변동(참고).",
+]
+

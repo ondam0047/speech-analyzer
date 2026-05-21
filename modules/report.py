@@ -13,9 +13,11 @@ from modules.morpheme import BROAD_OF, GRAM_ORDER, SEMANTIC_ORDER, SENTENCE_TYPE
 from modules.norms import (
     ATYPICAL_NOTE,
     CONSONANT_STAGE_TABLE,
+    LANGUAGE_REFERENCES,
     REFERENCES,
     VOWEL_NOTE,
     developmental_reference,
+    language_reference,
 )
 
 _CSS = """
@@ -35,6 +37,7 @@ td.l,th.l{text-align:left}
 .muted{color:#777;font-size:12px;margin:4px 0}
 .atyp{color:#c0392b;font-weight:700}
 .tag{display:inline-block;background:#eef3f8;border:1px solid #dbe6f0;border-radius:10px;padding:1px 8px;margin:2px;font-size:12px}
+.insight{white-space:pre-wrap;background:#f7faf7;border:1px solid #d6e6d6;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.6}
 @media print{body{margin:0}h2{break-after:avoid}}
 """
 
@@ -215,6 +218,38 @@ def _norms_section(age_months: int | None) -> str:
     return "\n".join(out)
 
 
+def _language_norms_section(age_months: int | None) -> str:
+    out = ["<h2>📚 언어 발달 규준 (해석 근거)</h2>"]
+    ref = language_reference(age_months)
+    if ref:
+        y, m = divmod(ref["age_months"], 12)
+        lo_m, hi_m = ref["mlu_m_range"]
+        lo_w, hi_w = ref["mlu_w_range"]
+        out.append(f"<h3>생활연령 {y}세 {m}개월 참고 범위(근사)</h3>")
+        out.append(_table(
+            ["항목", "내용"],
+            [["MLU-m(형태소) 참고 범위", f"{lo_m}~{hi_m}"],
+             ["MLU-w(낱말) 참고 범위", f"{lo_w}~{hi_w}"],
+             ["문법/구문 기대", ref["grammar_note"]]],
+            left_cols=(0, 1)))
+        out.append('<p class="muted">MLU 참고 범위는 표본·전사 기준에 민감한 근사치입니다. '
+                   "TTR은 표본 크기에 민감해 연령 절대비교에 부적합합니다. "
+                   "최종 판정은 표준화 검사로 확인해야 합니다.</p>")
+    else:
+        out.append('<p class="muted">생활연령 미입력 — 연령 대비 비교는 제한적입니다.</p>')
+    out.append("<h3>참고 문헌</h3>")
+    out.append('<p class="muted">' + "<br>".join(_esc(r) for r in LANGUAGE_REFERENCES) + "</p>")
+    return "\n".join(out)
+
+
+def _insight_section(insight: str) -> str:
+    body = _esc(insight)
+    return ('<h2>🧠 LLM 임상 코멘트 (참고)</h2>'
+            f'<div class="insight">{body}</div>'
+            '<p class="muted">AI가 생성한 해석으로 임상가 검수가 필요합니다. '
+            "최종 판정은 표준화 검사 결과로 확인하세요.</p>")
+
+
 def _patient_section(patient: dict) -> str:
     items = []
     if patient.get("name"):
@@ -232,7 +267,9 @@ def _patient_section(patient: dict) -> str:
 
 def build_report_html(language: dict | None = None, articulation: dict | None = None,
                       patient: dict | None = None, intelligibility: dict | None = None,
+                      insight: str | None = None,
                       title: str = "자발화 분석 보고서") -> str:
+    age_months = (patient or {}).get("age_months")
     sections = []
     if patient:
         ps = _patient_section(patient)
@@ -242,9 +279,12 @@ def build_report_html(language: dict | None = None, articulation: dict | None = 
         sections.append(_intelligibility_section(intelligibility))
     if language is not None:
         sections.append(_language_section(language))
+        sections.append(_language_norms_section(age_months))
     if articulation is not None:
         sections.append(_articulation_section(articulation))
-        sections.append(_norms_section((patient or {}).get("age_months")))
+        sections.append(_norms_section(age_months))
+    if insight:
+        sections.append(_insight_section(insight))
     if not sections:
         sections.append("<p>분석 결과가 없습니다.</p>")
     body = "\n".join(sections)

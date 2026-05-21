@@ -10,6 +10,9 @@ import sys
 import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from modules.insights import generate_insight, summarize_language  # noqa: E402
+from modules.intelligibility import compute_intelligibility  # noqa: E402
+from modules.norms import LANGUAGE_REFERENCES, language_reference_text  # noqa: E402
 from modules.shared_ui import (  # noqa: E402
     SHARED_TRANSCRIPT,
     _read_manual_table,
@@ -21,6 +24,7 @@ from modules.shared_ui import (  # noqa: E402
     require_password,
     voice_target_review,
 )
+from modules.transcription import TranscriptionError  # noqa: E402
 
 st.set_page_config(page_title="언어 분석", page_icon="📝", layout="wide")
 require_password()
@@ -95,10 +99,54 @@ else:  # 음성 업로드 (언어 분석은 목표어만 필요)
             st.warning("아동 발화로 지정된 항목이 없습니다.")
 
 if utterances:
-    result = get_analyzer().analyze(utterances)
+    st.session_state["lang_result"] = get_analyzer().analyze(utterances)
+    st.session_state["intelligibility"] = compute_intelligibility(utterances)
+    st.session_state.pop("lang_insight", None)
+
+result = st.session_state.get("lang_result")
+if result:
     render_language_results(result)
+
+    st.divider()
+    st.subheader("🗣️ 말명료도 (이해가능도)")
+    intel = st.session_state.get("intelligibility") or compute_intelligibility(
+        [u["text"] for u in result["utterances"]])
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("어절 명료도", f"{intel['word_intelligibility']}%")
+    m2.metric("음절 명료도", f"{intel['syllable_intelligibility']}%")
+    m3.metric("이해 어절 / 전체", f"{intel['intelligible_words']} / {intel['total_words']}")
+    m4.metric("불명료 어절", intel["unintelligible_words"])
+    st.caption("못 알아들은 부분을 음절 수만큼 ‘*’로 표기하면 명료도가 계산됩니다(예: 3음절 → ***). "
+               "어절 명료도 = ‘*’ 없는 어절 / 전체 어절 × 100. 전사 페이지에서도 확인할 수 있습니다.")
+
     st.divider()
     report_download_button(language=result, key="lang")
+
+    st.divider()
+    st.subheader("임상 코멘트")
+    st.text(summarize_language(result))
+    patient = st.session_state.get("patient_info") or {}
+    age_months = patient.get("age_months")
+    if age_months:
+        st.caption(f"LLM 코멘트는 생활연령 **{patient.get('age', '')}** 기준 언어 발달 규준으로 "
+                   "연령 대비 적절성(MLU 등)을 함께 해석합니다.")
+    else:
+        st.warning("⚠️ 생활연령이 계산되지 않아 LLM 임상 코멘트를 생성할 수 없습니다. "
+                   "사이드바에 **생년월일·검사일**을 입력하세요.")
+    with st.expander("📚 연령 기반 언어 발달 규준 (코멘트 근거) 보기"):
+        st.text(language_reference_text(age_months))
+        st.markdown("**참고 문헌**")
+        for r in LANGUAGE_REFERENCES:
+            st.caption(f"- {r}")
+    if st.button("🧠 LLM 임상 코멘트 생성", disabled=not age_months, key="lang_llm"):
+        try:
+            with st.spinner("코멘트 생성 중…"):
+                st.session_state["lang_insight"] = generate_insight(
+                    language=result, api_key=api_key, age_months=age_months)
+        except TranscriptionError as e:
+            st.error(str(e))
+    if age_months and st.session_state.get("lang_insight"):
+        st.markdown(st.session_state["lang_insight"])
 
 st.divider()
 st.page_link("app.py", label="← 홈으로", icon="🏠")

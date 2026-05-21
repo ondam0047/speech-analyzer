@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import os
 
-from modules.norms import developmental_reference, reference_text
+from modules.norms import (
+    developmental_reference,
+    language_reference,
+    language_reference_text,
+    reference_text,
+)
 from modules.transcription import TranscriptionError, _get_client
 
 APAC_TAXONOMY = (
@@ -132,17 +137,49 @@ def norm_comparison(articulation: dict, age_months: int | None) -> str:
     return "\n".join(lines)
 
 
+def language_norm_comparison(language: dict, age_months: int | None) -> str:
+    """대상자의 언어 수치(MLU 등)를 생활연령 규준과 대조한 결과(프롬프트·표시용)."""
+    ref = language_reference(age_months)
+    if ref is None:
+        return ""
+    s = language["stats"]
+    lo_m, hi_m = ref["mlu_m_range"]
+    lo_w, hi_w = ref["mlu_w_range"]
+
+    def judge(v: float, lo: float, hi: float) -> str:
+        if v < lo:
+            return "연령 기대보다 낮음(주목)"
+        if v > hi:
+            return "연령 기대 이상"
+        return "연령 기대 범위"
+
+    y, m = divmod(ref["age_months"], 12)
+    return "\n".join([
+        "[생활연령 규준 대비 현행수준 비교 — 언어, 이 비교를 코멘트에 반드시 반영]",
+        f"  · 생활연령 {y}세 {m}개월",
+        f"  · MLU-m {s['mlu_m']} (연령 참고 {lo_m}~{hi_m}): {judge(s['mlu_m'], lo_m, hi_m)}",
+        f"  · MLU-w {s['mlu_w']} (연령 참고 {lo_w}~{hi_w}): {judge(s['mlu_w'], lo_w, hi_w)}",
+        f"  · NDW {s['ndw']}, TTR {s['ttr']} (TTR은 표본 크기에 민감 — 절대비교 주의)",
+        f"  · 문법/구문 기대: {ref['grammar_note']}",
+        "  ※ MLU 참고 범위는 근사치 — 최종 판정은 표준화 검사로 확인.",
+    ])
+
+
 def _build_prompt(articulation: dict | None, language: dict | None,
                   age_months: int | None = None) -> tuple[str, str]:
+    norm_blocks = []
+    if articulation is not None:
+        norm_blocks.append(f"[APAC 음운변동 분류]\n{APAC_TAXONOMY}")
+        norm_blocks.append(f"[조음 발달 규준 — 연령 기반 근거]\n{reference_text(age_months)}")
+    if language is not None:
+        norm_blocks.append(f"[언어 발달 규준 — 연령 기반 근거]\n{language_reference_text(age_months)}")
     system = (
         "당신은 아동 말·언어 평가를 돕는 언어재활(언어치료) 전문가입니다. "
         "주어진 자동 분석 수치를 임상적으로 해석하되, 단정하지 말고 경향으로 기술하고, "
         "자동 분석의 한계(전사 오류·정렬 잡음 가능)를 전제로 임상가 검수를 권고하세요. "
-        "아래 APAC 음운변동 분류와 발달 규준을 참고해, 관찰된 패턴이 어떤 변동에 해당할 수 있는지, "
-        "그리고 대상자의 생활연령에 비추어 '연령상 정상 범위'인지 '연령 대비 지연/주목 대상'인지 "
-        "반드시 근거(어떤 자음/변동이 해당 연령에 기대되는지)와 함께 기술하세요.\n\n"
-        f"[APAC 음운변동 분류]\n{APAC_TAXONOMY}\n\n"
-        f"[발달 규준 — 연령 기반 해석 근거]\n{reference_text(age_months)}"
+        "아래 발달 규준을 참고해, 관찰된 패턴이 대상자의 생활연령에 비추어 "
+        "'연령상 정상 범위'인지 '연령 대비 지연/주목 대상'인지 반드시 근거와 함께 기술하세요.\n\n"
+        + "\n\n".join(norm_blocks)
     )
     parts = []
     if articulation is not None:
@@ -152,15 +189,17 @@ def _build_prompt(articulation: dict | None, language: dict | None,
             parts.append(cmp_text)
     if language is not None:
         parts.append("[언어 분석 요약]\n" + summarize_language(language))
+        lcmp = language_norm_comparison(language, age_months)
+        if lcmp:
+            parts.append(lcmp)
     user = (
         "다음 자동 분석 결과를 바탕으로 한국어 불릿으로 정리하세요.\n"
-        "① 두드러진 조음·음운 오류 패턴과 가능한 음운변동 해석\n"
+        "① 두드러진 특징(조음 분석이면 오류·음운변동, 언어 분석이면 어휘·구문) 해석\n"
         "② **생활연령 규준 대비 현행수준 비교** — 위 '규준 대비 현행수준 비교' 정보를 활용해, "
-        "어떤 자음/음운변동이 연령 기대 대비 '지연/주목 대상'이고 어떤 것이 '연령상 정상 범위'인지 "
-        "구체적 음소·변동명과 함께 반드시 기술(이 항목은 생략 금지)\n"
-        "③ 어휘·구문(언어) 특징\n"
-        "④ 임상적 제언\n"
-        "확실하지 않은 부분은 검수 필요로 표시하고, 최종 판정은 표준화 검사(U-TAP2/APAC) 백분위로 "
+        "어떤 지표(자음/음운변동/MLU 등)가 연령 기대 대비 '지연/주목 대상'이고 어떤 것이 "
+        "'연령상 정상 범위'인지 구체적 음소·지표명과 함께 반드시 기술(이 항목은 생략 금지)\n"
+        "③ 임상적 제언\n"
+        "확실하지 않은 부분은 검수 필요로 표시하고, 최종 판정은 표준화 검사 백분위로 "
         "확인하도록 권고하세요.\n\n"
         + "\n\n".join(parts)
     )
