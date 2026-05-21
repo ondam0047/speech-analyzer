@@ -123,6 +123,34 @@ def split_sentences(text) -> list[str]:
     return [p for p in parts if p]
 
 
+def _split_pair(target, produced) -> list[tuple[str, str]]:
+    """목표어를 기준으로 나누고 산출형을 함께 분리.
+
+    - 목표어를 마침표/줄바꿈으로 분리.
+    - 산출형에 같은 수의 종결부호가 있으면 그대로 짝짓는다.
+    - 없으면(보통 산출형엔 마침표가 없음) 목표어 각 조각의 어절 수만큼
+      산출형 어절을 순서대로 분배한다(조음 정렬이 어절 단위이므로).
+    """
+    t_parts = split_sentences(target)
+    if len(t_parts) <= 1:
+        return [(str(target or "").strip(), str(produced or "").strip())]
+    p_parts = split_sentences(produced)
+    if len(p_parts) == len(t_parts):
+        return list(zip(t_parts, p_parts))
+    p_words = str(produced or "").split()
+    out: list[tuple[str, str]] = []
+    idx = 0
+    for k, tp in enumerate(t_parts):
+        if k == len(t_parts) - 1:
+            chunk = p_words[idx:]  # 마지막 조각이 남은 산출형 어절을 모두 가져감
+        else:
+            n = len(tp.split())
+            chunk = p_words[idx:idx + n]
+            idx += n
+        out.append((tp, " ".join(chunk)))
+    return out
+
+
 def _time_label(start: float, end: float) -> str:
     return f"{format_ts(start)}–{format_ts(end)}"
 
@@ -202,7 +230,8 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
 
     st.markdown(
         "**듀얼 검수** — 화자(아동/치료사/제외) 지정 · 목표어/산출형 수정 · "
-        "한 칸에 여러 문장이 붙어 있으면 마침표(.)를 넣고 **‘✂️ 발화 나누기’**로 행을 분리하세요.")
+        "목표어 한 칸에 여러 문장이 있으면 마침표(.)를 넣고 **‘✂️ 발화 나누기’**를 누르면 "
+        "산출형도 어절 단위로 함께 나뉩니다.")
 
     ver = st.session_state.get(ver_key, 0)
     df = pd.DataFrame([
@@ -224,15 +253,11 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
     lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
     c_split, c_gen = st.columns(2)
 
-    if c_split.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_split",
+    if c_split.button("✂️ 발화 나누기 (목표어 기준 · 산출형 동반)", key=f"{prefix}_split",
                       use_container_width=True):
         new_rows = []
         for r in _rows_from_edited(edited, lookup):
-            t_parts = split_sentences(r["목표어"])
-            p_parts = split_sentences(r["산출형"])
-            for k in range(max(len(t_parts), len(p_parts), 1)):
-                tgt = t_parts[k] if k < len(t_parts) else ""
-                prod = p_parts[k] if k < len(p_parts) else ""
+            for tgt, prod in _split_pair(r["목표어"], r["산출형"]):
                 if tgt or prod:
                     new_rows.append({"start": r["start"], "end": r["end"],
                                      "화자": r["화자"], "목표어": tgt, "산출형": prod})
@@ -273,7 +298,8 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
         st.session_state[msg_key] = msgs
         st.rerun()
 
-    st.caption("‘발화 나누기’는 모든 행을 마침표/줄바꿈 기준으로 다시 나눕니다 (시간·화자 유지). "
+    st.caption("‘발화 나누기’는 목표어의 마침표/줄바꿈을 기준으로 행을 나누고, 산출형은 "
+               "어절 수에 맞춰 함께 분리합니다(시간·화자 유지). 산출형에도 마침표가 있으면 그 기준을 우선합니다. "
                "자동 생성은 빈 산출형(아동)만 채우며 입력한 산출형은 보존됩니다.")
     return edited
 
