@@ -317,21 +317,97 @@ _MANUAL_SAMPLE = [
     {"목표어": "토끼가 풀을 먹어요", "산출형": "토띠가 푸을 머거요"},
 ]
 
+_TARGET_KW = ("목표", "표준", "target", "standard", "낱말", "단어", "어절", "발화", "문장", "어휘")
+_PRODUCED_KW = ("산출", "produced", "실제", "발음", "오류")
+
+
+def _read_manual_table(file) -> list[dict]:
+    """업로드한 엑셀/CSV → [{목표어, 산출형}] 리스트.
+
+    헤더에 '목표어/표준철자', '산출형' 등이 있으면 그 열을 매핑하고,
+    헤더가 없으면 1열=목표어, 2열=산출형으로 본다.
+    """
+    name = (getattr(file, "name", "") or "").lower()
+    if name.endswith(".csv"):
+        try:
+            raw = pd.read_csv(file, header=None, dtype=object, encoding="utf-8-sig")
+        except Exception:
+            file.seek(0)
+            raw = pd.read_csv(file, header=None, dtype=object, encoding="cp949")
+    else:
+        raw = pd.read_excel(file, header=None, engine="openpyxl")
+    if raw is None or raw.empty:
+        return []
+    raw = raw.fillna("")
+    first = [str(x).strip() for x in raw.iloc[0].tolist()]
+    has_header = any(any(k in c.lower() for k in _TARGET_KW + _PRODUCED_KW) for c in first)
+    tcol, pcol = 0, (1 if raw.shape[1] > 1 else None)
+    if has_header:
+        tcol, pcol = None, None
+        for i, name_i in enumerate(first):
+            low = name_i.lower()
+            if tcol is None and any(k in low for k in _TARGET_KW):
+                tcol = i
+            if pcol is None and any(k in low for k in _PRODUCED_KW):
+                pcol = i
+        if tcol is None:
+            tcol = 0
+        body = raw.iloc[1:]
+    else:
+        body = raw
+    rows = []
+    for _, r in body.iterrows():
+        tgt = str(r.iloc[tcol]).strip() if tcol is not None and tcol < len(r) else ""
+        prod = str(r.iloc[pcol]).strip() if pcol is not None and pcol < len(r) else ""
+        if tgt or prod:
+            rows.append({"목표어": tgt, "산출형": prod})
+    return rows
+
 
 def manual_dual_entry(prefix: str) -> pd.DataFrame:
     """음성 없이 목표어/산출형을 직접 입력하는 검수 표(조음·통합).
 
     임상가가 귀로 들은 산출형을 직접 전사한다. 목표어(표준 철자)에는 g2p가
     자연스러운 음운변동(연음·경음화·비음화 등)을 자동 적용하므로, 자연 변동은
-    오류로 잡히지 않는다. 반환: 화자/목표어/산출형 DataFrame.
+    오류로 잡히지 않는다. 엑셀/CSV 업로드로 목표어를 일괄 입력할 수 있다.
+    반환: 화자/목표어/산출형 DataFrame.
     """
     rows_key, ver_key = f"{prefix}_mrows", f"{prefix}_mver"
+    msg_key, sig_key = f"{prefix}_mmsg", f"{prefix}_msig"
     if rows_key not in st.session_state:
         st.session_state[rows_key] = [{"목표어": "", "산출형": ""} for _ in range(6)]
 
     st.markdown(
         "**직접 입력** — 한 줄에 한 낱말/발화. **목표어**는 표준 철자(예: `먹어요`), "
         "**산출형**은 아동이 실제로 낸 발음을 들리는 대로(예: `머거요`) 한글로 적습니다.")
+
+    up = st.file_uploader(
+        "엑셀/CSV로 목표어 일괄 불러오기 (.xlsx, .csv) — 목표어·산출형 열 자동 인식",
+        type=["xlsx", "csv"], key=f"{prefix}_mupl")
+    if up is not None:
+        sig = (up.name, getattr(up, "size", None))
+        if st.session_state.get(sig_key) != sig:
+            st.session_state[sig_key] = sig
+            try:
+                imported = _read_manual_table(up)
+            except Exception as e:
+                imported = []
+                st.session_state[msg_key] = ("error", f"파일을 읽지 못했습니다: {e}")
+            if imported:
+                st.session_state[rows_key] = imported
+                st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+                st.session_state[msg_key] = (
+                    "success", f"{len(imported)}개 행을 불러왔습니다. 목표어·산출형을 검수하세요.")
+            elif msg_key not in st.session_state:
+                st.session_state[msg_key] = (
+                    "warning", "불러올 데이터가 없습니다. 첫 시트에 목표어(또는 목표어/산출형) "
+                    "열이 있는지 확인하세요.")
+            st.rerun()
+
+    msg = st.session_state.pop(msg_key, None)
+    if msg:
+        getattr(st, msg[0])(msg[1])
+
     if st.button("예시 불러오기", key=f"{prefix}_msample"):
         st.session_state[rows_key] = [dict(r) for r in _MANUAL_SAMPLE]
         st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
