@@ -34,29 +34,16 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21d · mecab 의존성 추가(g2p 핵심 수정) + 입력유실 되돌림"
+BUILD_TAG = "2026-05-21e · 순수 파이썬 g2p(네이티브 의존성 제거)"
 
 
 def g2p_self_test() -> tuple[bool, str]:
-    """g2p가 배포 환경에서 실제로 동작하는지 확인(국물→궁물).
-
-    실패 시 실제 예외/원인을 반환한다(g2pkk는 mecab 미설치 시 조용히 None을
-    반환해 변환이 원문으로 떨어진다 → mecab 설치 여부를 함께 점검).
-    """
-    mecab_ok = False
+    """g2p가 동작하는지 확인(국물→궁물). 규칙 기반이라 네이티브 의존성 없음."""
     try:
-        import mecab
-        mecab.MeCab()
-        mecab_ok = True
-    except Exception as e:
-        return False, f"mecab 미작동: {type(e).__name__}: {e}"
-    try:
-        out = get_g2p()._g2p("국물")  # 원시 호출로 실제 예외를 표면화
-        if out == "궁물":
-            return True, f"국물→{out} (mecab OK)"
-        return False, f"국물→{out} (mecab={mecab_ok}, 변환 비정상)"
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e} (mecab={mecab_ok})"
+        out = get_g2p().to_pronunciation("국물")
+        return (out == "궁물"), f"국물→{out}"
+    except Exception as e:  # pragma: no cover
+        return False, f"{type(e).__name__}: {e}"
 
 
 @st.cache_resource(show_spinner="형태소 분석기 로딩 중…")

@@ -29,10 +29,9 @@ with st.expander("🔧 배포 확인 / g2p 작동 테스트", expanded=False):
     if st.button("g2p 작동 확인 (국물 → 궁물)"):
         ok, out = g2p_self_test()
         if ok:
-            st.success(f"✅ g2p 정상 작동: 국물 → {out} (발음형 변환·조음 분석 정상)")
+            st.success(f"✅ g2p 정상 작동: {out} (발음형 변환·조음 분석 정상)")
         else:
-            st.error(f"⚠️ g2p 미작동: 국물 → {out}  "
-                     "(cmudict 미적용/리빌드 미완료 가능 → Manage app에서 Reboot)")
+            st.error(f"⚠️ g2p 미작동: {out} (배포 미완료 가능 → 잠시 후 새로고침/Reboot)")
 
 st.markdown("### 1단계 · 전사 (선택)")
 with st.container(border=True):
