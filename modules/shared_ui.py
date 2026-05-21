@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21f · 조음 산출형 자동채움 + 통합분석 제거"
+BUILD_TAG = "2026-05-21g · 대상자 정보(생활연령) 사이드바 + OpenAI 키 접기"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -115,21 +115,62 @@ def _server_key() -> str:
     return env if env and not env.startswith("sk-...") else ""
 
 
-def api_key_input() -> str:
-    """공용 키가 설정돼 있으면 상태만 표시, 없으면 입력란 제공(로컬/개인)."""
+def _chrono_age(birth, test) -> str:
+    """생년월일·검사일 → 생활연령 'N세 M개월'."""
+    if not birth or not test or test < birth:
+        return ""
+    years = test.year - birth.year
+    months = test.month - birth.month
+    if test.day < birth.day:
+        months -= 1
+    if months < 0:
+        years -= 1
+        months += 12
+    return f"{years}세 {months}개월"
+
+
+def patient_info_sidebar() -> dict:
+    """사이드바: 대상자 정보(이름/생년월일/검사일/생활연령) + (고급) OpenAI 키."""
+    import datetime as _dt
+    today = _dt.date.today()
     with st.sidebar:
-        if _server_key():
-            st.caption("🔑 OpenAI 키: 운영자 설정됨")
+        st.markdown("### 🧒 대상자 정보")
+        name = st.text_input("이름", key="pt_name")
+        birth = st.date_input(
+            "생년월일", value=None, format="YYYY-MM-DD",
+            min_value=_dt.date(1920, 1, 1), max_value=today, key="pt_birth")
+        test = st.date_input(
+            "검사일", value=today, format="YYYY-MM-DD",
+            min_value=_dt.date(1920, 1, 1), max_value=today, key="pt_test")
+        age = _chrono_age(birth, test)
+        if age:
+            st.success(f"생활연령: **{age}**")
         else:
-            st.markdown("### 🔑 OpenAI API 키")
-            entered = st.text_input(
-                "sk-...", type="password", key="api_key_field",
-                help="음성 전사·AI 코멘트에 필요. 이 세션에만 보관됩니다.")
-            if entered.strip():
-                st.session_state["user_api_key"] = entered.strip()
-            if not get_openai_key():
-                st.caption("키가 없어도 텍스트 언어 분석은 동작합니다.")
-            st.caption("키 발급: platform.openai.com")
+            st.caption("생년월일을 입력하면 생활연령이 자동 계산됩니다.")
+
+        with st.expander("⚙️ 고급 — 음성 기능용 OpenAI 키"):
+            if _server_key():
+                st.caption("🔑 OpenAI 키: 운영자 설정됨")
+            else:
+                entered = st.text_input(
+                    "sk-...", type="password", key="api_key_field",
+                    help="음성 전사·AI 코멘트에만 필요. 직접 입력·텍스트 분석은 키 없이 동작합니다.")
+                if entered.strip():
+                    st.session_state["user_api_key"] = entered.strip()
+
+    info = {
+        "name": (name or "").strip(),
+        "birth": birth.isoformat() if birth else "",
+        "test": test.isoformat() if test else "",
+        "age": age,
+    }
+    st.session_state["patient_info"] = info
+    return info
+
+
+def api_key_input() -> str:
+    """사이드바(대상자 정보 + 고급 OpenAI 키) 렌더 후 사용할 OpenAI 키 반환."""
+    patient_info_sidebar()
     return get_openai_key()
 
 
@@ -583,10 +624,12 @@ def report_download_button(language: dict | None = None,
                            articulation: dict | None = None, key: str = "") -> None:
     """분석 결과 → HTML 보고서 다운로드 버튼(브라우저 인쇄로 PDF 가능)."""
     from modules.report import build_report_html
-    doc = build_report_html(language=language, articulation=articulation)
+    patient = st.session_state.get("patient_info") or {}
+    doc = build_report_html(language=language, articulation=articulation, patient=patient)
+    safe = "".join(c for c in (patient.get("name") or "자발화") if c.isalnum() or c in " _-").strip()
     st.download_button(
         "📄 HTML 보고서 저장", data=doc.encode("utf-8"),
-        file_name="자발화_분석_보고서.html", mime="text/html", key=f"rep_{key}")
+        file_name=f"{safe or '자발화'}_분석보고서.html", mime="text/html", key=f"rep_{key}")
     st.caption("다운로드한 HTML을 브라우저에서 열고 인쇄(Ctrl+P) → ‘PDF로 저장’하면 PDF가 됩니다.")
 
 

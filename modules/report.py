@@ -162,9 +162,28 @@ def _articulation_section(result: dict) -> str:
     return "\n".join(out)
 
 
+def _patient_section(patient: dict) -> str:
+    items = []
+    if patient.get("name"):
+        items.append(("대상자", patient["name"]))
+    if patient.get("birth"):
+        items.append(("생년월일", patient["birth"]))
+    if patient.get("test"):
+        items.append(("검사일", patient["test"]))
+    if patient.get("age"):
+        items.append(("생활연령", patient["age"]))
+    if not items:
+        return ""
+    return _table(["항목", "내용"], items, left_cols=(0, 1))
+
+
 def build_report_html(language: dict | None = None, articulation: dict | None = None,
-                      title: str = "자발화 분석 보고서") -> str:
+                      patient: dict | None = None, title: str = "자발화 분석 보고서") -> str:
     sections = []
+    if patient:
+        ps = _patient_section(patient)
+        if ps:
+            sections.append("<h2>대상자 정보</h2>" + ps)
     if language is not None:
         sections.append(_language_section(language))
     if articulation is not None:
