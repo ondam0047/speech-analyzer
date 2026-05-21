@@ -30,6 +30,9 @@ from modules.transcription import (
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# 전사 페이지 → 언어/조음 분석으로 넘기는 아동 발화(목표어) 세션 키
+SHARED_TRANSCRIPT = "shared_child_utterances"
+
 
 @st.cache_resource(show_spinner="형태소 분석기 로딩 중…")
 def get_analyzer() -> MorphemeAnalyzer:
@@ -181,6 +184,75 @@ def child_targets(edited: pd.DataFrame) -> list[str]:
     """아동 발화의 목표어(표준어) 리스트."""
     rows = edited[edited["화자"] == "아동"]
     return [str(t).strip() for t in rows["목표어"] if str(t).strip()]
+
+
+def child_utterances_from(edited: pd.DataFrame) -> list[str]:
+    """전사 검수표(화자/전사)에서 아동 발화만 추출."""
+    rows = edited[edited["화자"] == "아동"]
+    return [str(t).strip() for t in rows["전사"] if str(t).strip()]
+
+
+def voice_target_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
+    """음성 → Whisper 목표어 전사 + 화자 지정 + 발화 나누기(목표어 전용).
+
+    언어 분석·전사 페이지 공용. 반환: 편집된 DataFrame(화자/전사) 또는 None.
+    """
+    rows_key, ver_key = f"{prefix}_trows", f"{prefix}_tver"
+    uploaded = st.file_uploader(
+        "음성 파일 (.mp3, .wav, .m4a)", type=["mp3", "wav", "m4a"], key=f"{prefix}_tupl")
+    if uploaded is not None:
+        st.audio(uploaded)
+        if st.button("🎙️ 자동 전사 시작 (Whisper)", type="primary", key=f"{prefix}_ttr"):
+            try:
+                with st.spinner("Whisper 전사 중…"):
+                    segs = transcribe_target(
+                        uploaded.name, uploaded.getvalue(), api_key=api_key)
+                st.session_state[rows_key] = [
+                    {"start": s["start"], "end": s["end"], "화자": "아동", "전사": s["text"]}
+                    for s in segs
+                ]
+                st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+                st.success(f"{len(segs)}개 발화 전사 완료. 화자를 지정하고 검수하세요.")
+            except TranscriptionError as e:
+                st.error(str(e))
+
+    rows = st.session_state.get(rows_key)
+    if not rows:
+        st.info("음성을 업로드하고 자동 전사를 시작하세요.")
+        return None
+
+    st.markdown("**발화별 검수** — 화자(아동/치료사/제외) 지정 · 전사 수정 · "
+                "한 칸에 여러 문장이 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’")
+    ver = st.session_state.get(ver_key, 0)
+    df = pd.DataFrame([
+        {"#": i + 1, "시간": _time_label(r["start"], r["end"]),
+         "화자": r["화자"], "전사": r["전사"]}
+        for i, r in enumerate(rows)
+    ])
+    edited = st.data_editor(
+        df, key=f"{prefix}_ttable_{ver}", use_container_width=True, hide_index=True,
+        num_rows="dynamic", disabled=["#", "시간"],
+        column_config={
+            "화자": st.column_config.SelectboxColumn(
+                "화자", options=["아동", "치료사", "제외"], required=True, width="small"),
+            "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
+        },
+    )
+    lookup = {_time_label(r["start"], r["end"]): (r["start"], r["end"]) for r in rows}
+    if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)", key=f"{prefix}_tsplit"):
+        new_rows = []
+        for _, r in edited.iterrows():
+            start, end = _se_of(r.get("시간"), lookup)
+            spk = r.get("화자") or "아동"
+            for part in split_sentences(r.get("전사")):
+                new_rows.append({"start": start, "end": end, "화자": spk, "전사": part})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+    n_child = int((edited["화자"] == "아동").sum())
+    st.caption(f"아동 발화로 지정된 항목: {n_child}개 (이 항목만 분석/저장)")
+    return edited
 
 
 def _rows_from_edited(edited: pd.DataFrame, lookup: dict) -> list[dict]:
@@ -408,7 +480,16 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
     if msg:
         getattr(st, msg[0])(msg[1])
 
-    if st.button("예시 불러오기", key=f"{prefix}_msample"):
+    cb1, cb2 = st.columns(2)
+    shared = st.session_state.get(SHARED_TRANSCRIPT) or []
+    if cb1.button(f"📋 전사에서 목표어 불러오기 ({len(shared)}개)", key=f"{prefix}_mfromtrans",
+                  use_container_width=True, disabled=not shared):
+        st.session_state[rows_key] = [{"목표어": t, "산출형": ""} for t in shared]
+        st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+        st.session_state[msg_key] = ("success",
+                                     f"전사에서 {len(shared)}개 목표어를 불러왔습니다. 산출형을 전사하세요.")
+        st.rerun()
+    if cb2.button("예시 불러오기", key=f"{prefix}_msample", use_container_width=True):
         st.session_state[rows_key] = [dict(r) for r in _MANUAL_SAMPLE]
         st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
         st.rerun()
@@ -458,6 +539,26 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
 # ---------- 엑셀 내보내기 ----------
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def transcript_to_excel(utterances: list[str]) -> bytes:
+    """아동 발화(목표어) → 엑셀(목표어·산출형 열). 조음 직접 입력에서 재업로드 가능."""
+    df = pd.DataFrame({"목표어": utterances, "산출형": ["" for _ in utterances]})
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        df.to_excel(xw, sheet_name="전사", index=False)
+    return buf.getvalue()
+
+
+def report_download_button(language: dict | None = None,
+                           articulation: dict | None = None, key: str = "") -> None:
+    """분석 결과 → HTML 보고서 다운로드 버튼(브라우저 인쇄로 PDF 가능)."""
+    from modules.report import build_report_html
+    doc = build_report_html(language=language, articulation=articulation)
+    st.download_button(
+        "📄 HTML 보고서 저장", data=doc.encode("utf-8"),
+        file_name="자발화_분석_보고서.html", mime="text/html", key=f"rep_{key}")
+    st.caption("다운로드한 HTML을 브라우저에서 열고 인쇄(Ctrl+P) → ‘PDF로 저장’하면 PDF가 됩니다.")
 
 
 def _language_detail_df(result: dict) -> pd.DataFrame:

@@ -20,6 +20,7 @@ from modules.shared_ui import (  # noqa: E402
     manual_dual_entry,
     render_articulation_results,
     render_language_results,
+    report_download_button,
     require_password,
     voice_dual_review,
 )
@@ -68,6 +69,8 @@ if lang is not None or artic is not None:
             st.info("목표어·산출형이 모두 입력된 아동 발화가 없어 조음 분석을 건너뛰었습니다.")
 
     with tab_report:
+        report_download_button(language=lang, articulation=artic, key="integ")
+        st.divider()
         st.subheader("자동 요약 (사실)")
         if lang is not None:
             st.text(summarize_language(lang))

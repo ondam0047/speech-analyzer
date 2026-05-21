@@ -19,7 +19,15 @@ api_key_input()
 st.title("🎙️ 자발화 분석 도구")
 st.caption("언어치료 자발화 분석 — 음성/텍스트 → 형태소·조음 분석 → 보고서 (로컬 도구)")
 
-st.markdown("### 어떤 분석을 하시겠어요?")
+st.markdown("### 1단계 · 전사 (선택)")
+with st.container(border=True):
+    st.subheader("🎤 전사")
+    st.write("음성 업로드 → 자동 전사 → 화자 지정(아동만) → 검수 → **분석에 사용 / 엑셀 저장**")
+    st.caption("여기서 저장한 아동 발화를 아래 언어·조음 분석에서 바로 불러올 수 있습니다. "
+               "(텍스트가 이미 있으면 이 단계를 건너뛰어도 됩니다.)")
+    st.page_link("pages/0_🎤_전사.py", label="전사 시작하기 →", use_container_width=True)
+
+st.markdown("### 2단계 · 분석")
 
 col1, col2, col3 = st.columns(3, gap="large")
 
@@ -27,16 +35,16 @@ with col1:
     with st.container(border=True):
         st.subheader("📝 언어 분석")
         st.write("**MLU, TTR, NDW**")
-        st.write("문법형태소 분포")
-        st.write("입력: 텍스트 또는 음성")
+        st.write("문법형태소·연결어미 분포")
+        st.write("입력: 전사 불러오기 · 텍스트 · 음성")
         st.page_link("pages/1_📝_언어_분석.py", label="시작하기 →", use_container_width=True)
 
 with col2:
     with st.container(border=True):
         st.subheader("🔊 조음 분석")
-        st.write("**PCC, 음운 오류**")
+        st.write("**PCC·PVC, 오류 음운변동**")
         st.write("컨퓨전 매트릭스 · 위치별 오류")
-        st.write("입력: 음성 필수")
+        st.write("입력: 직접 입력(목표어/산출형) · 음성")
         st.page_link("pages/2_🔊_조음_분석.py", label="시작하기 →", use_container_width=True)
 
 with col3:
@@ -44,22 +52,23 @@ with col3:
         st.subheader("🎯 통합 분석")
         st.write("**언어 + 조음**")
         st.write("종합 보고서")
-        st.write("입력: 음성 필수")
+        st.write("입력: 직접 입력 · 음성")
         st.page_link("pages/3_🎯_통합_분석.py", label="시작하기 →", use_container_width=True)
 
 st.divider()
 
-with st.expander("ℹ️ 분석 모드 안내"):
+with st.expander("ℹ️ 사용 순서 안내"):
     st.markdown(
         """
-        - **📝 언어 분석만** — 텍스트 직접 입력 또는 음성 업로드(Whisper 자동 전사 → 임상가 검수).
-          형태소 분석으로 MLU-w, MLU-m, TTR, NDW, TNW, 문법형태소 분포 산출.
-        - **🔊 조음 분석만** — 음성 업로드 → 듀얼 전사(Whisper 표준어 + GPT-4o audio 산출형) →
-          임상가 듀얼 검수 → 컨퓨전 매트릭스, PCC, 음소별 정확도, 위치별 오류.
-        - **🎯 통합 분석** — 음성 업로드 → 듀얼 전사·검수 → 언어 + 조음 모든 지표 + 종합 보고서.
+        1. **🎤 전사** — 음성을 올려 자동 전사 → 화자(아동/치료사/제외) 지정 → 검수
+           (마침표/엔터로 발화 나누기) → **분석에 사용**(세션) 또는 **엑셀 저장**.
+        2. **📝 언어 분석** — 전사 결과 불러오기 / 텍스트 입력 / 음성 업로드 후 분석.
+           MLU-w·MLU-m·TTR·NDW·TNW, 의미영역, 조사·어미(연결어미) 빈도, 문장유형.
+        3. **🔊 조음 분석** — 전사에서 목표어 불러오기(또는 직접 입력) → 임상가가 **산출형(실제 발음)**
+           전사 → PCC·PVC, 오류 음운변동(상대분석), 위치별 오류. 자연스러운 음운변동은 오류로 잡히지 않음.
+        4. **🎯 통합 분석** — 언어 + 조음 동시 + 종합 코멘트.
+        5. 각 분석 후 **📄 HTML 보고서**로 저장(브라우저 인쇄 → PDF 가능).
 
-        > 환자 음성은 로컬에만 저장됩니다. OpenAI API 키는 `.env`에 설정하세요.
+        > 환자 음성은 업로드 시 서버·OpenAI로 전송됩니다. 보호자 동의·기관 정책을 확인하세요.
         """
     )
-
-st.caption("M1: 언어 분석(텍스트 입력)까지 구현됨. 음성/조음/통합은 후속 마일스톤(M2~M4).")

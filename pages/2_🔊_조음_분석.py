@@ -13,6 +13,7 @@ from modules.shared_ui import (  # noqa: E402
     child_pairs,
     manual_dual_entry,
     render_articulation_results,
+    report_download_button,
     require_password,
     voice_dual_review,
 )
@@ -44,6 +45,7 @@ result = st.session_state.get("artic_result")
 if result:
     st.divider()
     render_articulation_results(result)
+    report_download_button(articulation=result, key="artic")
 
     st.divider()
     st.subheader("임상 코멘트")

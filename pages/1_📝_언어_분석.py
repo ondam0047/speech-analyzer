@@ -1,27 +1,25 @@
 """📝 언어 분석 — MLU/TTR/NDW.
 
-텍스트 입력 또는 음성 업로드(Whisper 전사 + 화자 지정 → 아동 발화만).
+전사 결과 불러오기 / 텍스트 직접 입력 / 음성 업로드(자동 전사 + 화자 지정 → 아동 발화만).
 낱말 = 체언+용언+수식언+독립언. 의미/문법 영역 분석.
 """
 
 import os
 import sys
 
-import pandas as pd
 import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.shared_ui import (  # noqa: E402
+    SHARED_TRANSCRIPT,
+    _read_manual_table,
     api_key_input,
+    child_utterances_from,
     get_analyzer,
     render_language_results,
+    report_download_button,
     require_password,
-    split_sentences,
-)
-from modules.transcription import (  # noqa: E402
-    TranscriptionError,
-    format_ts,
-    transcribe_target,
+    voice_target_review,
 )
 
 st.set_page_config(page_title="언어 분석", page_icon="📝", layout="wide")
@@ -37,11 +35,43 @@ SAMPLE_UTTERANCES = """엄마랑 아빠랑 같이 큰집에 갔어요
 st.title("📝 언어 분석")
 st.caption("MLU-w · MLU-m · TTR · NDW · TNW  ·  낱말 = 체언 + 용언 + 수식언 + 독립언")
 
-input_mode = st.radio("입력 방식", ["텍스트 직접 입력", "음성 업로드"], horizontal=True)
+input_mode = st.radio(
+    "입력 방식", ["전사 결과 불러오기", "텍스트 직접 입력", "음성 업로드"], horizontal=True)
 
 utterances: list[str] | None = None
 
-if input_mode == "텍스트 직접 입력":
+if input_mode == "전사 결과 불러오기":
+    shared = st.session_state.get(SHARED_TRANSCRIPT) or []
+    if "lang_load_area" not in st.session_state:
+        st.session_state["lang_load_area"] = "\n".join(shared)
+    st.markdown("**전사 페이지에서 저장한 아동 발화를 불러오거나, 전사 엑셀/CSV를 업로드**하세요.")
+    if st.button(f"📋 전사 페이지 결과 불러오기 ({len(shared)}개)", disabled=not shared):
+        st.session_state["lang_load_area"] = "\n".join(shared)
+        st.rerun()
+    up = st.file_uploader("또는 전사 엑셀/CSV 업로드 (.xlsx, .csv)", type=["xlsx", "csv"], key="lang_imp")
+    if up is not None:
+        sig = (up.name, getattr(up, "size", None))
+        if st.session_state.get("lang_imp_sig") != sig:
+            st.session_state["lang_imp_sig"] = sig
+            try:
+                rows = _read_manual_table(up)
+                loaded = [r["목표어"] for r in rows if r["목표어"]]
+                if loaded:
+                    st.session_state["lang_load_area"] = "\n".join(loaded)
+                    st.rerun()
+                else:
+                    st.warning("불러올 목표어가 없습니다.")
+            except Exception as e:
+                st.error(f"파일을 읽지 못했습니다: {e}")
+    text = st.text_area("아동 발화 (한 줄 = 한 발화, 수정 가능)", key="lang_load_area", height=240)
+    if not shared and not st.session_state.get("lang_load_area"):
+        st.info("전사 페이지에서 ‘분석에 사용’으로 저장하거나, 위에 엑셀/CSV를 업로드하세요.")
+    if st.button("분석 실행", type="primary", key="lang_load_run"):
+        utterances = [line for line in text.splitlines() if line.strip()] or None
+        if utterances is None:
+            st.warning("발화가 없습니다.")
+
+elif input_mode == "텍스트 직접 입력":
     st.markdown("**발화를 한 줄에 하나씩 입력하세요.** (한 줄 = 한 발화)")
     st.caption("정확한 지표를 위해 표준어로 정규화하고 반복·수정·간투사(마디)는 제외한 전사를 권장합니다.")
     if st.button("예시 발화 불러오기"):
@@ -58,66 +88,17 @@ if input_mode == "텍스트 직접 입력":
 else:  # 음성 업로드 (언어 분석은 목표어만 필요)
     st.markdown("**음성을 업로드하면 Whisper로 전사합니다.** 화자(아동/치료사/제외)를 지정하면 **아동 발화만** 분석합니다.")
     st.caption("OpenAI API 키 필요 · Whisper 25MB 제한.")
-    uploaded = st.file_uploader("음성 파일 (.mp3, .wav, .m4a)", type=["mp3", "wav", "m4a"])
-    if uploaded is not None:
-        st.audio(uploaded)
-        if st.button("🎙️ 자동 전사 시작", type="primary"):
-            try:
-                with st.spinner("Whisper 전사 중…"):
-                    segs = transcribe_target(
-                        uploaded.name, uploaded.getvalue(), api_key=api_key)
-                st.session_state["lang_rows"] = [
-                    {"start": s["start"], "end": s["end"], "화자": "아동", "전사": s["text"]}
-                    for s in segs
-                ]
-                st.session_state["lang_ver"] = st.session_state.get("lang_ver", 0) + 1
-                st.success(f"{len(segs)}개 발화 전사 완료. 화자를 지정하고 검수하세요.")
-            except TranscriptionError as e:
-                st.error(str(e))
-
-    rows = st.session_state.get("lang_rows")
-    if rows:
-        st.markdown("**발화별 검수** — 화자 지정 + 표준어 수정 · "
-                    "한 칸에 여러 문장이 붙어 있으면 마침표(.)를 넣고 ‘✂️ 발화 나누기’로 분리")
-        ver = st.session_state.get("lang_ver", 0)
-        base_df = pd.DataFrame([
-            {"#": i + 1, "시간": f"{format_ts(r['start'])}–{format_ts(r['end'])}",
-             "화자": r["화자"], "전사": r["전사"]}
-            for i, r in enumerate(rows)
-        ])
-        edited_df = st.data_editor(
-            base_df, key=f"lang_voice_table_{ver}", use_container_width=True, hide_index=True,
-            num_rows="dynamic", disabled=["#", "시간"],
-            column_config={
-                "화자": st.column_config.SelectboxColumn(
-                    "화자", options=["아동", "치료사", "제외"], required=True, width="small"),
-                "전사": st.column_config.TextColumn("전사 (수정 가능)", width="large"),
-            })
-        time_lookup = {
-            f"{format_ts(r['start'])}–{format_ts(r['end'])}": (r["start"], r["end"])
-            for r in rows
-        }
-        if st.button("✂️ 발화 나누기 (마침표·줄바꿈 기준)"):
-            new_rows = []
-            for _, r in edited_df.iterrows():
-                t = r.get("시간")
-                start, end = time_lookup.get("" if pd.isna(t) else str(t), (0.0, 0.0))
-                spk = r.get("화자") or "아동"
-                for part in split_sentences(r.get("전사")):
-                    new_rows.append({"start": start, "end": end, "화자": spk, "전사": part})
-            if new_rows:
-                st.session_state["lang_rows"] = new_rows
-                st.session_state["lang_ver"] = ver + 1
-                st.rerun()
-        n_child = int((edited_df["화자"] == "아동").sum())
-        st.caption(f"아동 발화로 지정된 항목: {n_child}개 (이 항목만 분석) · "
-                   "‘발화 나누기’는 모든 행을 문장 단위로 다시 나눕니다.")
-        if st.button("분석 실행", type="primary"):
-            child = edited_df[edited_df["화자"] == "아동"]
-            utterances = [t for t in child["전사"].tolist() if str(t).strip()]
-            if not utterances:
-                st.warning("아동 발화로 지정된 항목이 없습니다.")
-                utterances = None
+    edited = voice_target_review("lang", api_key)
+    if edited is not None and st.button("분석 실행", type="primary"):
+        utterances = child_utterances_from(edited) or None
+        if utterances is None:
+            st.warning("아동 발화로 지정된 항목이 없습니다.")
 
 if utterances:
-    render_language_results(get_analyzer().analyze(utterances))
+    result = get_analyzer().analyze(utterances)
+    render_language_results(result)
+    st.divider()
+    report_download_button(language=result, key="lang")
+
+st.divider()
+st.page_link("app.py", label="← 홈으로", icon="🏠")
