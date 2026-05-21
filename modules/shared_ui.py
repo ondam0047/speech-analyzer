@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21g · 대상자 정보(생활연령) 사이드바 + OpenAI 키 접기"
+BUILD_TAG = "2026-05-21h · 말명료도 + 음절축약 + 오류상세 산출어절 + 채우기 버튼 상단"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -443,13 +443,6 @@ def voice_dual_review(prefix: str, api_key: str = "") -> pd.DataFrame | None:
     return edited
 
 
-_MANUAL_SAMPLE = [
-    {"목표어": "사슴", "산출형": "다듬"},
-    {"목표어": "색종이", "산출형": "택똥이"},
-    {"목표어": "먹어요", "산출형": "머거요"},
-    {"목표어": "토끼가 풀을 먹어요", "산출형": "토띠가 푸을 머거요"},
-]
-
 _TARGET_KW = ("목표", "표준", "target", "standard", "낱말", "단어", "어절", "발화", "문장", "어휘")
 _PRODUCED_KW = ("산출", "produced", "실제", "발음", "오류")
 
@@ -497,6 +490,33 @@ def _read_manual_table(file) -> list[dict]:
     return rows
 
 
+def _editor_current_rows(disp_key: str, editor_key: str) -> list[dict]:
+    """data_editor의 현재 내용(직전 편집 포함)을 [{목표어, 산출형}]로 반환.
+
+    버튼이 표보다 위에 있어도 직전 run의 위젯 편집 상태를 합쳐 최신 입력을 잃지 않는다.
+    """
+    base = st.session_state.get(disp_key)
+    if base is None:
+        return []
+    rows = base.to_dict("records")
+    state = st.session_state.get(editor_key) or {}
+    for k, ch in (state.get("edited_rows") or {}).items():
+        try:
+            i = int(k)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(rows):
+            rows[i] = {**rows[i], **ch}
+    for add in (state.get("added_rows") or []):
+        rows.append(dict(add))
+    deleted = {int(x) for x in (state.get("deleted_rows") or [])}
+    return [
+        {"목표어": str(r.get("목표어") or "").strip(),
+         "산출형": str(r.get("산출형") or "").strip()}
+        for i, r in enumerate(rows) if i not in deleted
+    ]
+
+
 def manual_dual_entry(prefix: str) -> pd.DataFrame:
     """음성 없이 목표어/산출형을 직접 입력하는 검수 표(조음).
 
@@ -541,6 +561,15 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
     if msg:
         getattr(st, msg[0])(msg[1])
 
+    ver = st.session_state.get(ver_key, 0)
+    # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다
+    # (매 리런마다 새 DataFrame을 넘기면 편집 내용이 초기화됨).
+    disp_key = f"{prefix}_mdisp_{ver}"
+    editor_key = f"{prefix}_mtable_{ver}"
+    if disp_key not in st.session_state:
+        st.session_state[disp_key] = pd.DataFrame(
+            st.session_state[rows_key], columns=["목표어", "산출형"])
+
     cb1, cb2 = st.columns(2)
     shared = st.session_state.get(SHARED_TRANSCRIPT) or []
     if cb1.button(f"📋 전사에서 목표어 불러오기 ({len(shared)}개)", key=f"{prefix}_mfromtrans",
@@ -550,20 +579,26 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
         st.session_state[msg_key] = ("success",
                                      f"전사에서 {len(shared)}개 목표어를 불러왔습니다. 산출형을 전사하세요.")
         st.rerun()
-    if cb2.button("예시 불러오기", key=f"{prefix}_msample", use_container_width=True):
-        st.session_state[rows_key] = [dict(r) for r in _MANUAL_SAMPLE]
-        st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
-        st.rerun()
+    # 산출형을 목표 발음형(자연 음운변동 적용)으로 미리 채우고, 임상가가 오류만 수정
+    if cb2.button("📝 산출형 = 목표 발음형으로 채우기 (빈칸만)", key=f"{prefix}_mfill",
+                  type="primary", use_container_width=True):
+        g2p = get_g2p()
+        new_rows = []
+        for r in _editor_current_rows(disp_key, editor_key):
+            tgt, prod = r["목표어"], r["산출형"]
+            if tgt and not prod:
+                prod = g2p.to_pronunciation_words(tgt)
+            if tgt or prod:
+                new_rows.append({"목표어": tgt, "산출형": prod})
+        if new_rows:
+            st.session_state[rows_key] = new_rows
+            st.session_state[ver_key] = ver + 1
+            st.rerun()
+    st.caption("‘산출형 = 목표 발음형으로 채우기’를 누르면 빈 산출형에 표준 발음형(연음·경음화 등 "
+               "자연 변동 적용)이 채워집니다. 아동이 다르게 낸 음소만 고치면 됩니다(전부 입력할 필요 없음).")
 
-    ver = st.session_state.get(ver_key, 0)
-    # 같은 ver 동안 동일한 DataFrame 객체를 재사용해야 data_editor 입력이 유지된다
-    # (매 리런마다 새 DataFrame을 넘기면 편집 내용이 초기화됨).
-    disp_key = f"{prefix}_mdisp_{ver}"
-    if disp_key not in st.session_state:
-        st.session_state[disp_key] = pd.DataFrame(
-            st.session_state[rows_key], columns=["목표어", "산출형"])
     edited = st.data_editor(
-        st.session_state[disp_key], key=f"{prefix}_mtable_{ver}",
+        st.session_state[disp_key], key=editor_key,
         use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "목표어": st.column_config.TextColumn("목표어 (표준 철자)", width="medium"),
@@ -581,25 +616,6 @@ def manual_dual_entry(prefix: str) -> pd.DataFrame:
             st.session_state[rows_key] = new_rows
             st.session_state[ver_key] = ver + 1
             st.rerun()
-
-    # 산출형을 목표 발음형(자연 음운변동 적용)으로 미리 채우고, 임상가가 오류만 수정
-    if st.button("📝 산출형 = 목표 발음형으로 채우기 (빈칸만 · 여기서 수정 시작)",
-                 key=f"{prefix}_mfill"):
-        g2p = get_g2p()
-        new_rows = []
-        for _, r in edited.iterrows():
-            tgt = str(r.get("목표어") or "").strip()
-            prod = str(r.get("산출형") or "").strip()
-            if tgt and not prod:
-                prod = g2p.to_pronunciation_words(tgt)
-            if tgt or prod:
-                new_rows.append({"목표어": tgt, "산출형": prod})
-        if new_rows:
-            st.session_state[rows_key] = new_rows
-            st.session_state[ver_key] = ver + 1
-            st.rerun()
-    st.caption("‘산출형 = 목표 발음형으로 채우기’를 누르면 표준 발음형(연음·경음화 등 자연 변동 적용)이 "
-               "산출형에 채워집니다. 아동이 다르게 낸 음소만 고치면 됩니다(전부 입력할 필요 없음).")
 
     out = edited.copy()
     out["화자"] = "아동"
@@ -625,7 +641,9 @@ def report_download_button(language: dict | None = None,
     """분석 결과 → HTML 보고서 다운로드 버튼(브라우저 인쇄로 PDF 가능)."""
     from modules.report import build_report_html
     patient = st.session_state.get("patient_info") or {}
-    doc = build_report_html(language=language, articulation=articulation, patient=patient)
+    intelligibility = st.session_state.get("intelligibility")
+    doc = build_report_html(language=language, articulation=articulation, patient=patient,
+                            intelligibility=intelligibility)
     safe = "".join(c for c in (patient.get("name") or "자발화") if c.isalnum() or c in " _-").strip()
     st.download_button(
         "📄 HTML 보고서 저장", data=doc.encode("utf-8"),
@@ -713,9 +731,17 @@ def articulation_to_excel(result: dict) -> bytes:
                  for t, row in result["confusion_matrix"].items() for p, c in row.items()]
     conf = pd.DataFrame(conf_rows) if conf_rows else pd.DataFrame(columns=["목표", "산출", "빈도"])
     errs = pd.DataFrame(result["errors"]).rename(columns={
-        "target": "목표", "produced": "산출", "position": "위치",
-        "word": "어절", "process": "음운변동"}) \
-        if result["errors"] else pd.DataFrame(columns=["목표", "산출", "위치", "어절", "음운변동"])
+        "word": "목표어절", "target_pron": "목표발음", "produced_word": "산출어절",
+        "target": "목표(음소)", "produced": "산출(음소)", "position": "위치",
+        "process": "음운변동"}) \
+        if result["errors"] else pd.DataFrame(
+            columns=["목표어절", "목표발음", "산출어절", "목표(음소)", "산출(음소)", "위치", "음운변동"])
+    sc = result.get("syllable_changes") or []
+    syl = pd.DataFrame(sc).rename(columns={
+        "target_word": "목표어절", "target_pron": "목표발음", "target_syl": "목표음절",
+        "produced_word": "산출어절", "produced_syl": "산출음절", "reduced": "감소음절"}) \
+        if sc else pd.DataFrame(
+            columns=["목표어절", "목표발음", "목표음절", "산출어절", "산출음절", "감소음절"])
     pp = result.get("phonological_processes") or []
     proc = pd.DataFrame(
         [{"음운변동": x["process"], "유형": x["type"], "빈도": x["count"]} for x in pp]) \
@@ -734,6 +760,7 @@ def articulation_to_excel(result: dict) -> bytes:
         conf.to_excel(xw, sheet_name="컨퓨전매트릭스", index=False)
         proc.to_excel(xw, sheet_name="음운변동", index=False)
         errs.to_excel(xw, sheet_name="오류상세", index=False)
+        syl.to_excel(xw, sheet_name="음절축약", index=False)
         vowel_acc.to_excel(xw, sheet_name="모음정확도", index=False)
         vconf.to_excel(xw, sheet_name="모음컨퓨전", index=False)
     return buf.getvalue()
@@ -954,6 +981,23 @@ def render_articulation_results(result: dict) -> None:
     else:
         st.success("분류된 오류 음운변동이 없습니다.")
 
+    st.divider()
+    st.subheader("음절축약 / 음절 수 감소")
+    st.caption("산출 음절 수가 목표 발음형보다 적은 어절입니다. 음절 전체가 빠지면 음절생략, "
+               "두 음절이 하나로 합쳐지면 음절축약입니다(둘의 구분은 임상가 검수).")
+    sc = result.get("syllable_changes") or []
+    if sc:
+        sm = result["summary"]
+        m1, m2 = st.columns(2)
+        m1.metric("음절 감소 어절 수", sm.get("syllable_reductions", 0))
+        m2.metric("감소한 음절 수(합)", sm.get("syllables_reduced", 0))
+        sc_df = pd.DataFrame(sc).rename(columns={
+            "target_word": "목표어절", "target_pron": "목표발음", "target_syl": "목표음절",
+            "produced_word": "산출어절", "produced_syl": "산출음절", "reduced": "감소음절"})
+        st.dataframe(sc_df, use_container_width=True, hide_index=True)
+    else:
+        st.success("음절 수 감소(축약·생략)가 없습니다.")
+
     va = result.get("vowel_accuracy") or {}
     vcm = result.get("vowel_confusion_matrix") or {}
     if va or vcm:
@@ -979,20 +1023,25 @@ def render_articulation_results(result: dict) -> None:
 
     if result["errors"]:
         with st.expander(f"자음 오류 상세 ({len(result['errors'])}건)"):
+            st.caption("‘산출어절’은 아동이 실제로 낸 어절입니다 (예: 목표 ‘같이’→발음 ‘가치’, "
+                       "산출 ‘다치’이면 어두초성 ㄱ→ㄷ).")
             st.dataframe(
                 pd.DataFrame(result["errors"]).rename(columns={
-                    "target": "목표", "produced": "산출", "position": "위치",
-                    "word": "어절", "process": "음운변동"}),
+                    "word": "목표어절", "target_pron": "목표발음", "produced_word": "산출어절",
+                    "target": "목표(음소)", "produced": "산출(음소)", "position": "위치",
+                    "process": "음운변동"}),
                 use_container_width=True, hide_index=True)
     if result.get("vowel_errors"):
         with st.expander(f"모음 오류 상세 ({len(result['vowel_errors'])}건)"):
             st.dataframe(
                 pd.DataFrame(result["vowel_errors"]).rename(columns={
-                    "target": "목표", "produced": "산출", "word": "어절"}),
+                    "word": "목표어절", "target_pron": "목표발음", "produced_word": "산출어절",
+                    "target": "목표(모음)", "produced": "산출(모음)"}),
                 use_container_width=True, hide_index=True)
     if result.get("additions_detail"):
         with st.expander(f"첨가 상세 ({len(result['additions_detail'])}건)"):
             st.dataframe(
                 pd.DataFrame(result["additions_detail"]).rename(columns={
-                    "produced": "산출(첨가)", "position": "위치", "word": "어절"}),
+                    "produced": "산출(첨가음소)", "position": "위치",
+                    "target_word": "목표어절", "produced_word": "산출어절"}),
                 use_container_width=True, hide_index=True)

@@ -153,12 +153,39 @@ def _articulation_section(result: dict) -> str:
         out.append("<h3>모음 정확도</h3>")
         out.append(_table(["모음", "정확도(%)"], [[k, v] for k, v in va.items()], left_cols=(0,)))
 
+    sc = result.get("syllable_changes") or []
+    if sc:
+        out.append("<h3>음절축약 / 음절 수 감소</h3>")
+        out.append(_table(
+            ["목표어절", "목표발음", "목표음절", "산출어절", "산출음절", "감소음절"],
+            [[c["target_word"], c["target_pron"], c["target_syl"],
+              c["produced_word"], c["produced_syl"], c["reduced"]] for c in sc],
+            left_cols=(0, 1, 3)))
+        out.append('<p class="muted">음절 전체가 빠지면 음절생략, 두 음절이 하나로 합쳐지면 '
+                   "음절축약입니다 — 구분은 임상가 검수.</p>")
+
     if result["errors"]:
         out.append("<h3>자음 오류 상세</h3>")
         out.append(_table(
-            ["목표", "산출", "위치", "어절", "음운변동"],
-            [[e["target"], e["produced"], e["position"], e["word"], e.get("process", "")]
-             for e in result["errors"]], left_cols=(3, 4)))
+            ["목표어절", "목표발음", "산출어절", "목표(음소)", "산출(음소)", "위치", "음운변동"],
+            [[e.get("word", ""), e.get("target_pron", ""), e.get("produced_word", ""),
+              e["target"], e["produced"], e["position"], e.get("process", "")]
+             for e in result["errors"]], left_cols=(0, 1, 2, 6)))
+    return "\n".join(out)
+
+
+def _intelligibility_section(intel: dict) -> str:
+    out = ["<h2>🗣️ 말명료도 (이해가능도)</h2>"]
+    out.append('<div class="metrics">' + "".join([
+        _metric("어절 명료도", f'{intel["word_intelligibility"]}%'),
+        _metric("음절 명료도", f'{intel["syllable_intelligibility"]}%'),
+        _metric("전체 어절", intel["total_words"]),
+        _metric("이해 어절", intel["intelligible_words"]),
+        _metric("불명료 어절", intel["unintelligible_words"]),
+    ]) + "</div>")
+    out.append('<p class="muted">못 알아들은 부분은 음절 수만큼 ‘*’로 표기. '
+               "어절 명료도 = ‘*’ 없는 어절/전체 어절×100 · "
+               "음절 명료도 = (전체 음절−불명료 음절)/전체 음절×100.</p>")
     return "\n".join(out)
 
 
@@ -178,12 +205,15 @@ def _patient_section(patient: dict) -> str:
 
 
 def build_report_html(language: dict | None = None, articulation: dict | None = None,
-                      patient: dict | None = None, title: str = "자발화 분석 보고서") -> str:
+                      patient: dict | None = None, intelligibility: dict | None = None,
+                      title: str = "자발화 분석 보고서") -> str:
     sections = []
     if patient:
         ps = _patient_section(patient)
         if ps:
             sections.append("<h2>대상자 정보</h2>" + ps)
+    if intelligibility and intelligibility.get("total_words"):
+        sections.append(_intelligibility_section(intelligibility))
     if language is not None:
         sections.append(_language_section(language))
     if articulation is not None:
