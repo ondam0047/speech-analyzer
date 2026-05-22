@@ -258,6 +258,7 @@ def _patient_section(patient: dict) -> str:
 
 def build_report_html(language: dict | None = None, articulation: dict | None = None,
                       patient: dict | None = None, intelligibility: dict | None = None,
+                      emblem_data_uri: str | None = None,
                       title: str = "자발화 분석 보고서") -> str:
     age_months = (patient or {}).get("age_months")
     sections = []
@@ -276,9 +277,18 @@ def build_report_html(language: dict | None = None, articulation: dict | None = 
     if not sections:
         sections.append("<p>분석 결과가 없습니다.</p>")
     body = "\n".join(sections)
+    watermark = ""
+    if emblem_data_uri:
+        # 학과 앰블럼을 배경 워터마크로(내용 뒤, 인쇄 시에도 표시).
+        watermark = (
+            "body::before{content:'';position:fixed;inset:0;"
+            f"background:url(\"{emblem_data_uri}\") center center no-repeat;"
+            "background-size:55%;opacity:.07;z-index:-1;pointer-events:none;"
+            "-webkit-print-color-adjust:exact;print-color-adjust:exact}"
+        )
     return (
         "<!doctype html><html lang='ko'><head><meta charset='utf-8'>"
-        f"<title>{_esc(title)}</title><style>{_CSS}</style></head><body>"
+        f"<title>{_esc(title)}</title><style>{_CSS}{watermark}</style></head><body>"
         f"<h1>{_esc(title)}</h1>"
         f"<p class='muted'>생성일: {date.today().isoformat()} · 자동 분석 결과이므로 임상가 검수가 필요합니다.</p>"
         f"{body}</body></html>"

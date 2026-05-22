@@ -34,7 +34,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_TRANSCRIPT = "shared_child_utterances"
 
 # 배포 확인용 빌드 태그(수정 때마다 갱신). 홈 화면에 표시되어 새 배포 반영 여부를 눈으로 확인.
-BUILD_TAG = "2026-05-21r · 전사 페이지에서 말명료도 표시 제거(조음에서 계산)"
+BUILD_TAG = "2026-05-21s · 보고서 배경에 학과 앰블럼 워터마크(사이드바 업로드)"
 
 
 def g2p_self_test() -> tuple[bool, str]:
@@ -115,6 +115,31 @@ def _server_key() -> str:
     return env if env and not env.startswith("sk-...") else ""
 
 
+_IMG_MIME = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+             "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}
+
+
+def _to_data_uri(name: str, data: bytes) -> str:
+    """이미지 바이트 → base64 data URI(보고서에 인라인 임베드용)."""
+    import base64
+    ext = (name or "").lower().rsplit(".", 1)[-1]
+    mime = _IMG_MIME.get(ext, "image/png")
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+
+
+def _emblem_data_uri() -> str | None:
+    """보고서 워터마크용 앰블럼 data URI. 세션 업로드 우선, 없으면 assets/emblem.* 파일."""
+    uri = st.session_state.get("report_emblem")
+    if uri:
+        return uri
+    for ext in ("png", "svg", "jpg", "jpeg", "webp"):
+        path = os.path.join(_ROOT, "assets", f"emblem.{ext}")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return _to_data_uri(path, f.read())
+    return None
+
+
 def _chrono_age_months(birth, test) -> int | None:
     """생년월일·검사일 → 생활연령(총 개월). 계산 불가 시 None."""
     if not birth or not test or test < birth:
@@ -152,6 +177,24 @@ def patient_info_sidebar() -> dict:
             st.success(f"생활연령: **{age}**")
         else:
             st.caption("생년월일을 입력하면 생활연령이 자동 계산됩니다.")
+
+        with st.expander("📄 보고서 앰블럼 (배경 워터마크)"):
+            up = st.file_uploader(
+                "학과 앰블럼 이미지 (png/jpg/svg)", type=["png", "jpg", "jpeg", "svg"],
+                key="emblem_upl",
+                help="업로드하면 보고서 배경에 옅은 워터마크로 표시됩니다(이 세션 동안 유지).")
+            if up is not None:
+                sig = (up.name, getattr(up, "size", None))
+                if st.session_state.get("emblem_sig") != sig:
+                    st.session_state["emblem_sig"] = sig
+                    st.session_state["report_emblem"] = _to_data_uri(up.name, up.getvalue())
+            uri = st.session_state.get("report_emblem")
+            if uri:
+                st.markdown(f"<img src='{uri}' width='110'>", unsafe_allow_html=True)
+                if st.button("앰블럼 제거", key="emblem_clear"):
+                    for k in ("report_emblem", "emblem_sig"):
+                        st.session_state.pop(k, None)
+                    st.rerun()
 
         with st.expander("⚙️ 고급 — 음성 기능용 OpenAI 키"):
             if _server_key():
@@ -673,7 +716,7 @@ def report_download_button(language: dict | None = None,
     # 말명료도는 조음 지표 — 조음 보고서에만 포함
     intelligibility = st.session_state.get("intelligibility") if articulation is not None else None
     doc = build_report_html(language=language, articulation=articulation, patient=patient,
-                            intelligibility=intelligibility)
+                            intelligibility=intelligibility, emblem_data_uri=_emblem_data_uri())
     safe = "".join(c for c in (patient.get("name") or "자발화") if c.isalnum() or c in " _-").strip()
     st.download_button(
         "📄 HTML 보고서 저장", data=doc.encode("utf-8"),
